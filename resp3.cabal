@@ -1,0 +1,33 @@
+cabal-version:   3.0
+name:            resp3
+version:         1.0.0
+license:         BSD-3-Clause
+license-file:    LICENSE
+author:          Owen Shepherd
+maintainer:      owen@owen.cafe
+category:        Data
+build-type:      Simple
+extra-doc-files: CHANGELOG.md
+
+common warnings
+    ghc-options: -Wall
+
+library
+    import:           warnings
+    exposed-modules:  Data.RESP3
+    build-depends:    base >=4.8 && <5
+                    , bytestring
+                    , scanner
+                    , text
+    hs-source-dirs:   src
+    default-language: Haskell98
+
+test-suite resp3-test
+    import:           warnings
+    default-language: Haskell98
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   test
+    main-is:          Main.hs
+    build-depends:
+        base ^>=4.17.2.1,
+        resp3
