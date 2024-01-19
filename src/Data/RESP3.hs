@@ -2,41 +2,41 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Data.RESP3
-  ( reply
+  ( RespReply(..)
+  , reply
   ) where
 
 import qualified Data.ByteString       as BS
+import qualified Data.ByteString.Lazy  as BSL
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.Text.Encoding    as Text
 import qualified Scanner               as Scanner
 
-import Control.Monad
 import Data.ByteString (ByteString)
 import Data.Char       (digitToInt)
 import Data.Int        (Int64)
 import Data.Text       (Text)
 import Scanner         (Scanner)
 
-data Reply
-  = String Text
-  | Blob ByteString
+data RespReply
+  = RespString Text
+  | RespBlob ByteString
+  | RespStreamingBlob BSL.ByteString
   -- TODO will this always be text?
-  | StringError Text
-  | BinaryError ByteString
-  | Integer Int64
-  | Bulk (Maybe ByteString)
-  | Multi (Maybe [Reply])
+  | RespStringError Text
+  | RespBinaryError ByteString
+  | RespInteger Int64
   deriving (Show, Eq)
 
 data MessageSize
   = MSVariable
   | MSFixed Int
 
-reply :: Scanner Reply
+reply :: Scanner RespReply
 reply = do
   c <- Scanner.anyChar8
   case c of
-    '$' -> scanBlobstring
+    '$' -> scanBlob
     '+' -> scanString
     '-' -> scanError
     ':' -> scanInteger
@@ -52,29 +52,29 @@ scanMessageSize = do
 parseNatural :: Integral a => ByteString -> a
 parseNatural = BS8.foldl' (\a b -> a * 10 + fromIntegral (digitToInt b)) 0
 
-scanBlobstring :: Scanner Reply
-scanBlobstring = Blob <$> do
+scanBlob :: Scanner RespReply
+scanBlob = RespBlob <$> do
   ms <- scanMessageSize
   case ms of
     MSFixed n -> Scanner.take n <* scanEol
-    MSVariable -> streamingBlobstringParts
+    MSVariable -> streamingBlobParts
 
-streamingBlobstringParts :: Scanner ByteString
-streamingBlobstringParts = do
+streamingBlobParts :: Scanner ByteString
+streamingBlobParts = do
   Scanner.char8 ';'
   undefined
 
 -- TODO check RESP3 spec
-scanString :: Scanner Reply
-scanString = String . Text.decodeUtf8 <$> scanLine
+scanString :: Scanner RespReply
+scanString = RespString . Text.decodeUtf8 <$> scanLine
 
 -- TODO check RESP3 spec
-scanError :: Scanner Reply
-scanError = StringError . Text.decodeUtf8 <$> scanLine
+scanError :: Scanner RespReply
+scanError = RespStringError . Text.decodeUtf8 <$> scanLine
 
 -- TODO check RESP3 spec
-scanInteger :: Scanner Reply
-scanInteger = Integer . parseNatural <$> scanLine
+scanInteger :: Scanner RespReply
+scanInteger = RespInteger . parseNatural <$> scanLine
 
 scanLine :: Scanner ByteString
 scanLine = Scanner.takeWhileChar8 (/= '\r') <* scanEol
