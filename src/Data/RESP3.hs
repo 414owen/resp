@@ -17,6 +17,7 @@ import Data.Char       (digitToInt)
 import Data.Int        (Int64)
 import Data.Text       (Text)
 import Scanner         (Scanner)
+import Control.Monad (when)
 
 data RespReply
   = RespString Text
@@ -61,7 +62,7 @@ scanBlob = RespBlob <$> do
 
 streamingBlobParts :: Scanner ByteString
 streamingBlobParts = do
-  Scanner.char8 ';'
+  expectChar ';'
   undefined
 
 -- TODO check RESP3 spec
@@ -79,7 +80,12 @@ scanInteger = RespInteger . parseNatural <$> scanLine
 scanLine :: Scanner ByteString
 scanLine = Scanner.takeWhileChar8 (/= '\r') <* scanEol
 
+expectChar :: Char -> Scanner ()
+expectChar c = do
+  d <- Scanner.anyChar8
+  when (c /= d) $ fail $ "Expected " <> show c <> ", but got " <> show d
+
 scanEol :: Scanner ()
 scanEol = do
-  Scanner.char8 '\r'
-  Scanner.char8 '\n'
+  expectChar '\r'
+  expectChar '\n'
