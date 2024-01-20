@@ -1,11 +1,13 @@
 {-# LANGUAGE ApplicativeDo     #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TupleSections #-}
 
 module Data.RESP3
   ( RespReply(..)
   , reply
   ) where
 
+import qualified Data.ByteString       as BS
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.Text.Encoding    as Text
 import qualified Scanner               as Scanner
@@ -38,6 +40,7 @@ data RespReply
   | RespInteger Int64
   | RespNull
   | RespBool Bool
+  | RespDouble Double
   deriving (Show, Eq)
 
 data MessageSize
@@ -57,10 +60,55 @@ scanTopLevelReply c = case c of
   '*' -> scanArray
   '_' -> scanEol $> RespNull
   '#' -> RespBool . (== 't') <$> Scanner.anyChar8 <* scanEol
+  ',' -> scanDouble
   _ -> fail "Unknown reply type"
 
+bsContains :: Char -> ByteString -> Bool
+bsContains c = BS8.any (== c)
+
+scanDouble :: Scanner RespReply
+scanDouble = do
+  c <- Scanner.anyChar8
+  RespDouble . fromRational <$> case c of
+    '+' -> go1 =<< Scanner.anyChar8
+    '-' -> fmap negate $ go1 =<< Scanner.anyChar8
+    _ -> go1 c
+
+  where
+    go1 :: Char -> Scanner Rational
+    go1 c1 = do
+      decStr <- Scanner.takeWhileChar8 $ not . (`bsContains` ".\reE")
+      let dec = parseNatural1 c1 decStr :: Integer
+      c2 <- Scanner.anyChar8
+      case c2 of
+        '\r' -> expectChar '\n' $> fromIntegral dec
+        '.' -> do
+          decStr1 <- Scanner.takeWhileChar8 $ not . (`bsContains` "\reE")
+          let dec1 = fromIntegral (parseNatural' dec decStr1) / (10 ^ BS.length decStr1) :: Rational
+          c3 <- Scanner.anyChar8
+          case c3 of
+            '\r' -> pure dec1
+            _ {- c3 `elem` "eE" -} -> go2 dec1
+        _ {- c3 `elem` "eE" -} -> go2 $ fromIntegral dec
+
+    go2 :: Rational -> Scanner Rational
+    go2 n = do
+      c <- Scanner.anyChar8
+      (negExp, exponent') <- case c of
+        '-' -> (True,) . parseNatural <$> scanLine
+        '+' -> (False,) . parseNatural <$> scanLine
+        _ {- isDigit c -} -> (False,) . parseNatural1 c <$> scanLine
+      let expMul = fromIntegral (10 ^ (exponent' :: Integer) :: Integer) :: Rational
+      pure $ if negExp then n / expMul else n * expMul
+
 parseNatural :: Integral a => ByteString -> a
-parseNatural = BS8.foldl' (\a b -> a * 10 + fromIntegral (digitToInt b)) 0
+parseNatural = parseNatural' 0
+
+parseNatural' :: Integral a => a -> ByteString -> a
+parseNatural' = BS8.foldl' (\a b -> a * 10 + fromIntegral (digitToInt b))
+
+parseNatural1 :: Integral a => Char -> ByteString -> a
+parseNatural1 = parseNatural' . fromIntegral . digitToInt
 
 -- RESP2 calls these 'multi bulk'
 -- RESP3 calls it an 'array'

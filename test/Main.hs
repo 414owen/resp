@@ -110,4 +110,11 @@ main = defaultMain $ testGroup "Tests"
       , testCase "false" $ scanReply "#f\r\n" @?= Right (RespBool False)
       ]
 
+    , testGroup "doubles"
+      [ testCase "from int" $ scanReply ",42\r\n" @?= Right (RespDouble 42)
+      , testCase "with decimal pt" $ scanReply ",42.12\r\n" @?= Right (RespDouble 42.12)
+      , testCase "with exponent" $ scanReply ",42.12e2\r\n" @?= Right (RespDouble 4212)
+      , testCase "with positive exponent" $ scanReply ",42.12e+2\r\n" @?= Right (RespDouble 4212)
+      , testCase "negative with negative exponent" $ scanReply ",-42.12e-2\r\n" @?= Right (RespDouble (-0.4212))
+      ]
   ]
