@@ -66,17 +66,36 @@ scanTopLevelReply c = case c of
 bsContains :: Char -> ByteString -> Bool
 bsContains c = BS8.any (== c)
 
+canStartNaN :: Char -> Bool
+canStartNaN 'n' = True
+canStartNaN 'N' = True
+canStartNaN _ = False
+
+-- (inf|-inf|nan|(+|-)?\d+(\.\d+)?([eE](+|-)?\d+))
+--
+-- Due to Redis bugs prior to 7.2, we also have to deal with
+-- /(-)?nan(\(.*\))?/i, even though they're not part of the
+-- RESP spec...
 scanDouble :: Scanner RespReply
 scanDouble = do
   c <- Scanner.anyChar8
-  RespDouble . fromRational <$> case c of
+  RespDouble <$> case c of
     '+' -> go1 =<< Scanner.anyChar8
     '-' -> fmap negate $ go1 =<< Scanner.anyChar8
-    _ -> go1 c
+    'i' -> do
+      -- Note: We're not validating that the rest of the line
+      -- is actually "nf", because `,i` uniquely determines the
+      -- set of valid responses.
+      scanLine $> (1 / 0)
+    _ | canStartNaN c -> scanLine $> (0 / 0)
+      | otherwise -> go1 c
 
   where
-    go1 :: Char -> Scanner Rational
-    go1 c1 = do
+    -- takes first non-sign char
+    go1 :: Char -> Scanner Double
+    go1 'i' = scanLine $> (1 / 0)
+    go1 c | canStartNaN c = scanLine $> (0 / 0)
+    go1 c1 = fromRational <$> do
       decStr <- Scanner.takeWhileChar8 $ not . (`bsContains` ".\reE")
       let dec = parseNatural1 c1 decStr :: Integer
       c2 <- Scanner.anyChar8
@@ -109,6 +128,9 @@ parseNatural' = BS8.foldl' (\a b -> a * 10 + fromIntegral (digitToInt b))
 
 parseNatural1 :: Integral a => Char -> ByteString -> a
 parseNatural1 = parseNatural' . fromIntegral . digitToInt
+
+parseNatural2 :: Integral a => Char -> Char -> ByteString -> a
+parseNatural2 c1 c2 = parseNatural' $ fromIntegral $ (digitToInt c1 * 10) + digitToInt c2
 
 -- RESP2 calls these 'multi bulk'
 -- RESP3 calls it an 'array'
@@ -165,7 +187,12 @@ scanStringError :: Scanner RespReply
 scanStringError = RespStringError . Text.decodeUtf8 <$> scanLine
 
 scanInteger :: Scanner RespReply
-scanInteger = RespInteger . parseNatural <$> scanLine
+scanInteger = do
+  c <- Scanner.anyChar8
+  RespInteger <$> case c of
+    '+' -> parseNatural <$> scanLine
+    '-' -> negate . parseNatural <$> scanLine
+    _ -> parseNatural1 c <$> scanLine
 
 scanLine :: Scanner ByteString
 scanLine = Scanner.takeWhileChar8 (/= '\r') <* scanEol

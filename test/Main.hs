@@ -32,6 +32,14 @@ testInt bs expected = scanReply bs @?= Right (RespInteger expected)
 testArray :: ByteString -> [RespReply] -> Assertion
 testArray bs expected = scanReply bs @?= Right (RespArray expected)
 
+testDouble :: ByteString -> Double -> Assertion
+testDouble bs d = scanReply bs @?= Right (RespDouble d)
+
+testDouble' :: ByteString -> (Double -> Assertion) -> Assertion
+testDouble' bs f = case scanReply bs of
+  Right (RespDouble d) -> f d
+  _ -> assertFailure "Expected to parse into a double"
+
 main :: IO ()
 main = defaultMain $ testGroup "Tests"
   [ testGroup "simple string"
@@ -59,10 +67,11 @@ main = defaultMain $ testGroup "Tests"
     -- We currently parse a zero-digit integer as 0,
     -- even though it's technically an invalid response
     -- in the spec. Sometimes being lenient is efficient.
-    [ testCase "empty" $ testInt ":\r\n" 0
+    [ testCase "empty" $ scanReply ":\r\n" @?= Left "No more input"
     , testCase "zero" $ testInt ":0\r\n" 0
     , testCase "one" $ testInt ":1\r\n" 1
     , testCase "forty-two" $ testInt ":42\r\n" 42
+    , testCase "forty-two" $ testInt ":-42\r\n" (-42)
     ]
 
   , testGroup "null"
@@ -114,12 +123,20 @@ main = defaultMain $ testGroup "Tests"
       ]
 
     , testGroup "double"
-      [ testCase "from int" $ scanReply ",42\r\n" @?= Right (RespDouble 42)
-      , testCase "with decimal pt" $ scanReply ",42.12\r\n" @?= Right (RespDouble 42.12)
-      , testCase "with exponent" $ scanReply ",42.12e2\r\n" @?= Right (RespDouble 4212)
-      , testCase "with positive exponent" $ scanReply ",42.12e+2\r\n" @?= Right (RespDouble 4212)
-      , testCase "negative with negative exponent" $ scanReply ",-42.12e-2\r\n" @?= Right (RespDouble (-0.4212))
+      [ testCase "from int" $ testDouble ",42\r\n" 42
+      , testCase "with decimal pt" $ testDouble ",42.12\r\n" 42.12
+      , testCase "with exponent" $ testDouble ",42.12e2\r\n" 4212
+      , testCase "with positive exponent" $ testDouble ",42.12e+2\r\n" 4212
+      , testCase "negative with negative exponent" $ testDouble ",-42.12e-2\r\n" (-0.4212)
+
+      , testCase "inf" $ testDouble' ",inf\r\n" $ assertBool "is infinite" . isInfinite
+      , testCase "-inf" $ testDouble' ",-inf\r\n" $ \d -> do
+          assertBool "is infinite" $ isInfinite d
+          assertBool "== negate (1/0)" $ d == negate (1 / 0)
+      , testCase "nan" $ testDouble' ",nan\r\n" $ assertBool "is NaN" . isNaN
+
       -- Looks like we can also parse all `show`n doubles
       , testProperty "quickcheck" $ \d -> scanReply ("," <> BS8.pack (show d) <> "\r\n") == Right (RespDouble d)
+
       ]
   ]
