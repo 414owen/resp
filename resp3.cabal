@@ -34,4 +34,5 @@ test-suite resp3-test
                     , scanner
                     , tasty
                     , tasty-hunit
+                    , tasty-quickcheck
                     , text

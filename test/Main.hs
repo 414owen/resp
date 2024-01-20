@@ -11,6 +11,9 @@ import Test.Tasty.HUnit
 import Data.ByteString.Lazy (LazyByteString)
 import Data.Int (Int64)
 
+import qualified Data.ByteString.Char8 as BS8
+import Test.Tasty.QuickCheck (testProperty)
+
 scanReply :: ByteString -> Either String RespReply
 scanReply = scanOnly reply
 
@@ -105,16 +108,18 @@ main = defaultMain $ testGroup "Tests"
 
     , testCase "null" $ scanReply "_\r\n" @?= Right RespNull
 
-    , testGroup "booleans"
+    , testGroup "boolean"
       [ testCase "true" $ scanReply "#t\r\n" @?= Right (RespBool True)
       , testCase "false" $ scanReply "#f\r\n" @?= Right (RespBool False)
       ]
 
-    , testGroup "doubles"
+    , testGroup "double"
       [ testCase "from int" $ scanReply ",42\r\n" @?= Right (RespDouble 42)
       , testCase "with decimal pt" $ scanReply ",42.12\r\n" @?= Right (RespDouble 42.12)
       , testCase "with exponent" $ scanReply ",42.12e2\r\n" @?= Right (RespDouble 4212)
       , testCase "with positive exponent" $ scanReply ",42.12e+2\r\n" @?= Right (RespDouble 4212)
       , testCase "negative with negative exponent" $ scanReply ",-42.12e-2\r\n" @?= Right (RespDouble (-0.4212))
+      -- Looks like we can also parse all `show`n doubles
+      , testProperty "quickcheck" $ \d -> scanReply ("," <> BS8.pack (show d) <> "\r\n") == Right (RespDouble d)
       ]
   ]
