@@ -41,6 +41,14 @@ import Control.Monad        (when, replicateM)
 -- This type synonym was introduced in bytestring 0.11.2.0
 type LazyByteString = BSL.ByteString
 
+#if MIN_VERSION_bytestring(0,10,0)
+lazyBsToStrict :: LazyByteString -> ByteString
+lazyBsToStrict = BSL.toStrict
+#else
+lazyBsToStrict :: LazyByteString -> ByteString
+lazyBsToStrict = BS.concat . BSL.toChunks
+#endif
+
 -- | Top-level resp reply.
 -- Cannot be nested.
 data RespReply
@@ -125,7 +133,7 @@ parsePushType = do
   -- the spec, but in the meantime, we're going to have to parse all the
   -- blobstrings.
   case c of
-    '$' -> parseBlob' id BSL.toStrict $ fail "Push message type can't be null"
+    '$' -> parseBlob' id lazyBsToStrict $ fail "Push message type can't be null"
     '+' -> parseLine
     _ -> fail "Invalid push message type"
 
