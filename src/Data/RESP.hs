@@ -26,12 +26,20 @@ import Control.Applicative
 #if !MIN_VERSION_base(4,10,1)
 import Data.Monoid
 #endif
+#if MIN_VERSION_base(4,9,0) && !MIN_VERSION_base(4,11,0)
+import Data.Semigroup
+#endif
 import Data.ByteString      (ByteString)
 import Data.Char            (digitToInt)
 import Data.Int             (Int64)
 import Data.Text            (Text)
 import Scanner              (Scanner)
 import Control.Monad        (when, replicateM)
+
+#if !MIN_VERSION_base(4,9,0)
+infixr 6 <>
+(<>) = mappend
+#endif
 
 -- This type synonym was introduced in bytestring 0.11.2.0
 type LazyByteString = BSL.ByteString
