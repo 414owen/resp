@@ -25,7 +25,6 @@ import Data.Text            (Text)
 import Scanner              (Scanner)
 import Control.Monad        (when, replicateM)
 import qualified Data.ByteString.Lazy as BSL
-import Data.Functor (($>))
 
 -- This type synonym was introduced in bytestring 0.11.2.0
 type LazyByteString = BSL.ByteString
@@ -86,7 +85,7 @@ parseExpression' c = case c of
   '-' -> parseStringError
   ':' -> RespInteger <$> parseInteger
   '*' -> parseArray RespArray
-  '_' -> parseEol $> RespNull
+  '_' -> RespNull <$ parseEol 
   '#' -> RespBool . (== 't') <$> Scanner.anyChar8 <* parseEol
   ',' -> parseDouble
   '!' -> parseBlobError
@@ -130,7 +129,7 @@ parseVarMapPairs :: Scanner [(RespExpr, RespExpr)]
 parseVarMapPairs = do
   c <- Scanner.anyChar8
   case c of
-    '.' -> parseEol $> []
+    '.' -> [] <$ parseEol
     _ -> (:) <$> ((,) <$> parseExpression' c <*> parseExpression) <*> parseVarMapPairs
 
 parseTwoEls :: Scanner (RespExpr, RespExpr)
@@ -161,10 +160,10 @@ bsContains c = BS8.any (== c)
 -- Scanning to NaN is a function so that we don't
 -- feel guilty about inlining the patterns
 parseLineAsNaN :: Scanner Double
-parseLineAsNaN = parseLine $> (0 / 0)
+parseLineAsNaN = (0 / 0) <$ parseLine
 
 parseLineAsInf :: Scanner Double
-parseLineAsInf = parseLine $> (1 / 0)
+parseLineAsInf = (1 / 0) <$ parseLine
 
 -- (inf|-inf|nan|(+|-)?\d+(\.\d+)?([eE](+|-)?\d+))
 --
@@ -197,13 +196,13 @@ parseDouble = do
       let dec = parseNatural1 c1 decStr :: Integer
       c2 <- Scanner.anyChar8
       case c2 of
-        '\r' -> expectChar '\n' $> fromIntegral dec
+        '\r' -> fromIntegral dec <$ expectChar '\n' 
         '.' -> do
           decStr1 <- Scanner.takeWhileChar8 $ not . (`bsContains` "\reE")
           let dec1 = fromIntegral (parseNatural' dec decStr1) / (10 ^ BS.length decStr1) :: Rational
           c3 <- Scanner.anyChar8
           case c3 of
-            '\r' -> expectChar '\n' $> dec1
+            '\r' -> dec1 <$ expectChar '\n'
             _ {- c3 `elem` "eE" -} -> go2 dec1
         _ {- c3 `elem` "eE" -} -> go2 $ fromIntegral dec
 
@@ -245,7 +244,7 @@ parseVarArrayItems :: Scanner [RespExpr]
 parseVarArrayItems = do
   c <- Scanner.anyChar8
   case c of
-    '.' -> parseEol $> []
+    '.' -> [] <$ parseEol
     _ -> (:) <$> parseExpression' c <*> parseVarArrayItems
 
 -- RESP2 calls these 'bulk strings'
