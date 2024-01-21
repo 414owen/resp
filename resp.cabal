@@ -31,7 +31,7 @@ common warnings
 library
     import:           warnings
     exposed-modules:  Data.RESP3
-    build-depends:    base >=4.8 && <5
+    build-depends:    base >=4.3 && <5
                     , bytestring
                     , scanner
                     , text
@@ -44,7 +44,7 @@ test-suite resp-test
     type:             exitcode-stdio-1.0
     hs-source-dirs:   test
     main-is:          Main.hs
-    build-depends:    base >=4.8 && <5
+    build-depends:    base >=4.3 && <5
                     , bytestring
                     , resp
                     , scanner
