@@ -2,26 +2,24 @@
 
 module Main (main) where
 
-import Data.ByteString  (ByteString)
-import Data.RESP3       (reply, RespReply(..))
-import Data.Text        (Text)
+import Data.ByteString                 (ByteString)
+import Data.ByteString.Lazy            (LazyByteString)
+import Data.Int                        (Int64)
+import Data.RESP3                      (reply, RespReply(..))
+import qualified Data.Text.Encoding    as T
+import qualified Data.Text             as T
+import Data.Text                       (Text)
+import qualified Data.ByteString.Char8 as BS8
 import Scanner
 import Test.Tasty
 import Test.Tasty.HUnit
-import Data.ByteString.Lazy (LazyByteString)
-import Data.Int (Int64)
-
-import qualified Data.ByteString.Char8 as BS8
-import Test.Tasty.QuickCheck (testProperty)
+import Test.Tasty.QuickCheck           (testProperty)
 
 scanReply :: ByteString -> Either String RespReply
 scanReply = scanOnly reply
 
 testStr :: ByteString -> Text -> Assertion
 testStr bs expected = scanReply bs @?= Right (RespString expected)
-
-testBlob :: ByteString -> ByteString -> Assertion
-testBlob bs expected = scanReply bs @?= Right (RespBlob expected)
 
 testStreamingBlob :: ByteString -> LazyByteString -> Assertion
 testStreamingBlob bs expected = scanReply bs @?= Right (RespStreamingBlob expected)
@@ -40,6 +38,18 @@ testDouble' bs f = case scanReply bs of
   Right (RespDouble d) -> f d
   _ -> assertFailure "Expected to parse into a double"
 
+blobTestCases :: ByteString -> (ByteString -> RespReply) -> [TestTree]
+blobTestCases leader constr =
+  [ testCase "empty" $ scanReply (leader <> "0\r\n\r\n") @?= Right (constr "")
+  , testCase "simple" $ scanReply (leader <> "7\r\ntest me\r\n") @?= Right (constr "test me")
+  , testCase "multiline" $ scanReply (leader <> "15\r\ntest me\r\nline 2\r\n") @?= Right (constr "test me\r\nline 2")
+  , testCase "unicode" $ scanReply (leader <> "11\r\n( ͡° ͜ʖ ͡°)\r\n") @?= Right (constr "( ͡° ͜ʖ ͡°)")
+  , testCase "not enough bytes" $ scanReply (leader <> "10\r\nhello\r\n") @?= Left "No more input"
+  , testCase "too many bytes" $ scanReply (leader <> "2\r\nhello\r\n") @?= Left "Expected '\\r', but got 'l'"
+  , testProperty "quickcheck" $ \str -> let bs = T.encodeUtf8 (T.pack str) in
+      scanReply (leader <> BS8.pack (show $ BS8.length bs) <> "\r\n" <> bs <> "\r\n") == Right (constr bs)
+  ]
+
 main :: IO ()
 main = defaultMain $ testGroup "Tests"
   [ testGroup "simple string"
@@ -47,14 +57,8 @@ main = defaultMain $ testGroup "Tests"
     , testCase "nonempty string" $ testStr "+test me\r\n" "test me"
     ]
 
-  , testGroup "simple blobs"
-    [ testCase "empty" $ testBlob "$0\r\n\r\n" ""
-    , testCase "simple" $ testBlob "$7\r\ntest me\r\n" "test me"
-    , testCase "multiline" $ testBlob "$15\r\ntest me\r\nline 2\r\n" "test me\r\nline 2"
-    , testCase "unicode" $ testBlob "$11\r\n( ͡° ͜ʖ ͡°)\r\n" "( ͡° ͜ʖ ͡°)"
-    , testCase "not enough bytes" $ scanReply "$10\r\nhello\r\n" @?= Left "No more input"
-    , testCase "too many bytes" $ scanReply "$2\r\nhello\r\n" @?= Left "Expected '\\r', but got 'l'"
-    ]
+  , testGroup "simple blobs" $ blobTestCases "$" RespBlob
+  , testGroup "blob errors" $ blobTestCases "!" RespBlobError
 
   , testGroup "streaming blob parts"
     [ testCase "empty" $ testStreamingBlob "$?\r\n;0\r\n\r\n" ""
@@ -72,6 +76,7 @@ main = defaultMain $ testGroup "Tests"
     , testCase "one" $ testInt ":1\r\n" 1
     , testCase "forty-two" $ testInt ":42\r\n" 42
     , testCase "forty-two" $ testInt ":-42\r\n" (-42)
+    , testProperty "quickcheck" $ \i -> scanReply (":" <> BS8.pack (show i) <> "\r\n") == Right (RespInteger i)
     ]
 
   , testGroup "null"
@@ -137,6 +142,5 @@ main = defaultMain $ testGroup "Tests"
 
       -- Looks like we can also parse all `show`n doubles
       , testProperty "quickcheck" $ \d -> scanReply ("," <> BS8.pack (show d) <> "\r\n") == Right (RespDouble d)
-
       ]
   ]

@@ -61,15 +61,26 @@ scanTopLevelReply c = case c of
   '_' -> scanEol $> RespNull
   '#' -> RespBool . (== 't') <$> Scanner.anyChar8 <* scanEol
   ',' -> scanDouble
+  '!' -> scanBlobError
   _ -> fail "Unknown reply type"
+
+-- I suspect that this can't be streamed, or null
+-- See: https://github.com/redis/redis-specifications/issues/23
+scanBlobError :: Scanner RespReply
+scanBlobError = do
+  len <- scanMessageSize
+  RespBlobError <$> Scanner.take len <* scanEol
 
 bsContains :: Char -> ByteString -> Bool
 bsContains c = BS8.any (== c)
 
-canStartNaN :: Char -> Bool
-canStartNaN 'n' = True
-canStartNaN 'N' = True
-canStartNaN _ = False
+-- Make scanning to NaN a function so that we don't
+-- feel guilty about inlining the patterns
+scanLineAsNaN :: Scanner Double
+scanLineAsNaN = scanLine $> (0 / 0)
+
+scanLineAsInf :: Scanner Double
+scanLineAsInf = scanLine $> (1 / 0)
 
 -- (inf|-inf|nan|(+|-)?\d+(\.\d+)?([eE](+|-)?\d+))
 --
@@ -86,15 +97,17 @@ scanDouble = do
       -- Note: We're not validating that the rest of the line
       -- is actually "nf", because `,i` uniquely determines the
       -- set of valid responses.
-      scanLine $> (1 / 0)
-    _ | canStartNaN c -> scanLine $> (0 / 0)
-      | otherwise -> go1 c
+      scanLineAsInf
+    'n' -> scanLineAsNaN
+    'N' -> scanLineAsNaN
+    _ -> go1 c
 
   where
-    -- takes first non-sign char
+    -- takes first non-sign char of the significand
     go1 :: Char -> Scanner Double
-    go1 'i' = scanLine $> (1 / 0)
-    go1 c | canStartNaN c = scanLine $> (0 / 0)
+    go1 'i' = scanLineAsInf
+    go1 'n' = scanLineAsNaN
+    go1 'N' = scanLineAsNaN
     go1 c1 = fromRational <$> do
       decStr <- Scanner.takeWhileChar8 $ not . (`bsContains` ".\reE")
       let dec = parseNatural1 c1 decStr :: Integer
@@ -106,10 +119,11 @@ scanDouble = do
           let dec1 = fromIntegral (parseNatural' dec decStr1) / (10 ^ BS.length decStr1) :: Rational
           c3 <- Scanner.anyChar8
           case c3 of
-            '\r' -> pure dec1
+            '\r' -> expectChar '\n' $> dec1
             _ {- c3 `elem` "eE" -} -> go2 dec1
         _ {- c3 `elem` "eE" -} -> go2 $ fromIntegral dec
 
+    -- from first char of exponent (after [eE])
     go2 :: Rational -> Scanner Rational
     go2 n = do
       c <- Scanner.anyChar8
@@ -128,9 +142,6 @@ parseNatural' = BS8.foldl' (\a b -> a * 10 + fromIntegral (digitToInt b))
 
 parseNatural1 :: Integral a => Char -> ByteString -> a
 parseNatural1 = parseNatural' . fromIntegral . digitToInt
-
-parseNatural2 :: Integral a => Char -> Char -> ByteString -> a
-parseNatural2 c1 c2 = parseNatural' $ fromIntegral $ (digitToInt c1 * 10) + digitToInt c2
 
 -- RESP2 calls these 'multi bulk'
 -- RESP3 calls it an 'array'
