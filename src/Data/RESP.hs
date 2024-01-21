@@ -1,7 +1,10 @@
+{-# LANGUAGE CPP               #-}
+#if MIN_VERSION_GLASGOW_HASKELL(8,0,1,0)
 {-# LANGUAGE ApplicativeDo     #-}
+{-# LANGUAGE StrictData        #-}
+#endif
 {-# LANGUAGE OverloadedStrings #-}
 -- We don't declare any spines
-{-# LANGUAGE StrictData        #-}
 {-# LANGUAGE TupleSections     #-}
 
 module Data.RESP
