@@ -22,11 +22,14 @@ import qualified Scanner               as Scanner
 import Data.Functor
 import Control.Applicative
 #endif
-#if !MIN_VERSION_base(4,10,1)
-import Data.Monoid
-#endif
-#if MIN_VERSION_base(4,9,0) && !MIN_VERSION_base(4,11,0)
+
+#if !MIN_VERSION_base(4,11,0)
+# if MIN_VERSION_base(4,9,0)
 import Data.Semigroup
+import Data.Monoid (mempty)
+# else
+import Data.Monoid ((<>), mempty)
+# endif
 #endif
 import Data.ByteString      (ByteString)
 import Data.Char            (digitToInt)
@@ -34,11 +37,6 @@ import Data.Int             (Int64)
 import Data.Text            (Text)
 import Scanner              (Scanner)
 import Control.Monad        (when, replicateM)
-
-#if !MIN_VERSION_base(4,9,0)
-infixr 6 <>
-(<>) = mappend
-#endif
 
 -- This type synonym was introduced in bytestring 0.11.2.0
 type LazyByteString = BSL.ByteString
