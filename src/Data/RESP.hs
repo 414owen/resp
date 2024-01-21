@@ -27,10 +27,10 @@ import Control.Applicative
 # if MIN_VERSION_base(4,9,0)
 import Data.Semigroup
 import Data.Monoid (mempty)
-# elif MIN_VERSION_base(4,4,1)
+# elif MIN_VERSION_base(4,5,0)
 import Data.Monoid ((<>), mempty)
 # else
-import Data.Monoid (mempty)
+import Data.Monoid (mappend, mempty)
 # endif
 #endif
 import Data.ByteString      (ByteString)
@@ -51,7 +51,7 @@ lazyBsToStrict :: LazyByteString -> ByteString
 lazyBsToStrict = BS.concat . BSL.toChunks
 #endif
 
-#if !MIN_VERSION_base(4,4,1)
+#if !MIN_VERSION_base(4,5,0)
 infixr 6 <>
 (<>) = mappend
 #endif
