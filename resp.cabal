@@ -32,9 +32,9 @@ library
     import:           warnings
     exposed-modules:  Data.RESP
     build-depends:    base >=4.3 && <5
-                    , bytestring
-                    , scanner
-                    , text
+                    , bytestring >= 0.9 && < 0.13
+                    , scanner >= 0.1 && < 0.4
+                    , text >= 0.1 && < 2.1
     hs-source-dirs:   src
     default-language: Haskell98
 
