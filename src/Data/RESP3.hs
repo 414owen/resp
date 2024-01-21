@@ -39,6 +39,8 @@ data RespReply
   | RespVerbatimMarkdown Text
   | RespBigInteger Integer
   | RespMap [(RespReply, RespReply)]
+  | RespSet [RespReply]
+  | RespAttribute [(RespReply, RespReply)] RespReply
   deriving (Show, Eq)
 
 data MessageSize
@@ -61,7 +63,7 @@ scanTopLevelReply c = case c of
   '+' -> scanString
   '-' -> scanStringError
   ':' -> RespInteger <$> scanInteger
-  '*' -> scanArray
+  '*' -> scanArray RespArray
   '_' -> scanEol $> RespNull
   '#' -> RespBool . (== 't') <$> Scanner.anyChar8 <* scanEol
   ',' -> scanDouble
@@ -69,6 +71,8 @@ scanTopLevelReply c = case c of
   '=' -> scanVerbatimString
   '(' -> RespBigInteger <$> scanInteger
   '%' -> RespMap <$> scanMap
+  '~' -> scanArray RespSet
+  '|' -> RespAttribute <$> scanMap <*> reply
   _ -> fail "Unknown reply type"
 
 scanMap :: Scanner [(RespReply, RespReply)]
@@ -182,13 +186,16 @@ parseNatural1 = parseNatural' . fromIntegral . digitToInt
 
 -- RESP2 calls these 'multi bulk'
 -- RESP3 calls it an 'array'
-scanArray :: Scanner RespReply
-scanArray = do
+--
+-- This is used to parse arrays and sets, meaning that we parse
+-- "~-1\r\n" as RespNull, although this isn't a valid form in the spec.
+scanArray :: ([RespReply] -> RespReply) -> Scanner RespReply
+scanArray construct = do
   messageSize <- scanComplexNullableMessageSize
   case messageSize of
-    NMSFixed n -> RespArray <$> replicateM n reply
+    NMSFixed n -> construct <$> replicateM n reply
     NMSMinusOne -> pure RespNull
-    NMSVariable -> RespArray <$> scanVarArrayItems
+    NMSVariable -> construct <$> scanVarArrayItems
 
 -- See https://github.com/redis/redis-specifications/blob/master/protocol/RESP3.md#streamed-aggregated-data-types
 scanVarArrayItems :: Scanner [RespReply]

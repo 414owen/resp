@@ -171,4 +171,37 @@ main = defaultMain $ testGroup "Tests"
           @?= Right (RespMap [(RespString "a", RespInteger 1), (RespString "b", RespInteger 2)])
       ]
     ]
+  , testGroup "set"
+    [ testCase "empty" $ scanReply "~0\r\n" @?= Right (RespSet [])
+    , testCase "nonempty" $ scanReply "~5\r\n+orange\r\n+apple\r\n#t\r\n:100\r\n:999\r\n"
+        @?= Right (RespSet [RespString "orange", RespString "apple", RespBool True, RespInteger 100, RespInteger 999])
+    , testGroup "streamed"
+      [ testCase "empty" $ scanReply "~?\r\n.\r\n" @?= Right (RespSet [])
+      , testCase "streamed" $ scanReply "~?\r\n+a\r\n:1\r\n+b\r\n:2\r\n.\r\n"
+          @?= Right (RespSet [RespString "a", RespInteger 1, RespString "b", RespInteger 2])
+      ]
+    ]
+
+  , testGroup "attribute"
+    [ testCase "empty" $ scanReply "~0\r\n" @?= Right (RespSet [])
+    , testCase "nonempty" $ scanReply "|1\r\n+key-popularity\r\n%2\r\n$1\r\na\r\n,0.1923\r\n$1\r\nb\r\n,0.0012\r\n*2\r\n:2039123\r\n:9543892\r\n"
+        @?= Right (
+          RespAttribute
+            [ ( RespString "key-popularity"
+              , RespMap
+                [ ( RespBlob "a"
+                  , RespDouble 0.1923
+                  )
+                , ( RespBlob "b"
+                  , RespDouble 0.0012
+                  )
+                ]
+              )
+            ]
+          (RespArray
+            [ RespInteger 2039123
+            , RespInteger 9543892
+            ])
+        )
+    ]
   ]
