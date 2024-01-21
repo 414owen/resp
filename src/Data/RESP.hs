@@ -1,6 +1,5 @@
 {-# LANGUAGE CPP               #-}
-{-# LANGUAGE BangPatterns      #-}
-#if MIN_VERSION_GLASGOW_HASKELL(8,0,1,0)
+#if __GLASGOW_HASKELL__ >= 800
 {-# LANGUAGE ApplicativeDo     #-}
 #endif
 {-# LANGUAGE OverloadedStrings #-}
