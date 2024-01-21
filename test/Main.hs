@@ -3,13 +3,13 @@
 module Main (main) where
 
 import Data.ByteString                 (ByteString)
-import Data.ByteString.Lazy            (LazyByteString)
 import Data.RESP                       (RespReply(..), RespExpr(..))
 import qualified Data.RESP             as R3
 import qualified Data.Text.Encoding    as T
 import qualified Data.Text             as T
 import Data.Text                       (Text)
 import qualified Data.ByteString.Char8 as BS8
+import qualified Data.ByteString.Lazy  as BSL
 import Scanner
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -24,7 +24,7 @@ parseReply = scanOnly R3.parseReply
 testStr :: ByteString -> Text -> Assertion
 testStr bs expected = parseExpr bs @?= Right (RespString expected)
 
-testStreamingBlob :: ByteString -> LazyByteString -> Assertion
+testStreamingBlob :: ByteString -> BSL.ByteString -> Assertion
 testStreamingBlob bs expected = parseExpr bs @?= Right (RespStreamingBlob expected)
 
 testArray :: ByteString -> [RespExpr] -> Assertion
