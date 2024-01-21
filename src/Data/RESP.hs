@@ -17,9 +17,11 @@ import qualified Data.ByteString.Char8 as BS8
 import qualified Data.Text.Encoding    as Text
 import qualified Scanner               as Scanner
 
-#if !MIN_VERSION_base(4,9,0)
+#if !MIN_VERSION_base(4,8,0)
 import Data.Functor
 import Control.Applicative
+#endif
+#if !MIN_VERSION_base(4,10,1)
 import Data.Monoid
 #endif
 import Data.ByteString      (ByteString)
