@@ -3,6 +3,11 @@
 
 module Main (main) where
 
+#if !MIN_VERSION_base(4,8,0)
+import Data.Functor
+import Control.Applicative
+#endif
+
 #if !MIN_VERSION_base(4,11,0)
 # if MIN_VERSION_base(4,9,0)
 import Data.Semigroup
