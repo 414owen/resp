@@ -1,4 +1,4 @@
-# resp3
+# resp
 
 This is a [RESP3](https://redis.io/docs/reference/protocol-spec/) parser,
 implemented as a non-backtracking incremental scanner, using the

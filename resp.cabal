@@ -1,5 +1,5 @@
 cabal-version:   3.0
-name:            resp3
+name:            resp
 version:         1.0.0
 license:         BSD-3-Clause
 license-file:    LICENSE
@@ -38,7 +38,7 @@ library
     hs-source-dirs:   src
     default-language: Haskell98
 
-test-suite resp3-test
+test-suite resp-test
     import:           warnings
     default-language: Haskell98
     type:             exitcode-stdio-1.0
@@ -46,7 +46,7 @@ test-suite resp3-test
     main-is:          Main.hs
     build-depends:    base >=4.8 && <5
                     , bytestring
-                    , resp3
+                    , resp
                     , scanner
                     , tasty
                     , tasty-hunit
