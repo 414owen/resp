@@ -14,6 +14,7 @@ module Data.RESP
 
 import qualified Data.ByteString       as BS
 import qualified Data.ByteString.Char8 as BS8
+import qualified Data.ByteString.Lazy  as BSL
 import qualified Data.Text.Encoding    as Text
 import qualified Scanner               as Scanner
 
@@ -30,7 +31,6 @@ import Data.Int             (Int64)
 import Data.Text            (Text)
 import Scanner              (Scanner)
 import Control.Monad        (when, replicateM)
-import qualified Data.ByteString.Lazy as BSL
 
 -- This type synonym was introduced in bytestring 0.11.2.0
 type LazyByteString = BSL.ByteString
