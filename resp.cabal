@@ -8,7 +8,9 @@ maintainer:      owen@owen.cafe
 category:        Data
 build-type:      Simple
 synopsis   :     A fast, non-backtracking parser for the redis RESP3 protocol
-description:     A fast, non-backtracking parser for the redis RESP3 protocol
+description:     RESP is redis' serialization protocol. This package provides a
+                 lightweight and correct parser for RESP3, which can be used
+                 incrementally (eg. over a network connection).
 extra-doc-files: CHANGELOG.md
                , README.md
 tested-with:     GHC==9.6.2
