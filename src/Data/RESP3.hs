@@ -26,21 +26,16 @@ data RespReply
   = RespString Text
   | RespBlob ByteString
   | RespStreamingBlob LazyByteString
-
-  -- The redis convention of including an error code prefix
-  -- in the form "-PREFIX error message\r\n"
-  -- is just that, a convention, and isn't part of the
-  -- RESP protocol.
   | RespStringError Text
-
-  -- TODO
   | RespBlobError ByteString
-
   | RespArray [RespReply]
   | RespInteger Int64
   | RespNull
   | RespBool Bool
   | RespDouble Double
+  | RespVerbatimString Text
+  | RespVerbatimMarkdown Text
+  | RespBigInteger Integer
   deriving (Show, Eq)
 
 data MessageSize
@@ -56,13 +51,27 @@ scanTopLevelReply c = case c of
   '$' -> scanBlob
   '+' -> scanString
   '-' -> scanStringError
-  ':' -> scanInteger
+  ':' -> RespInteger <$> scanInteger
   '*' -> scanArray
   '_' -> scanEol $> RespNull
   '#' -> RespBool . (== 't') <$> Scanner.anyChar8 <* scanEol
   ',' -> scanDouble
   '!' -> scanBlobError
+  '=' -> scanVerbatimString
+  '(' -> RespBigInteger <$> scanInteger
   _ -> fail "Unknown reply type"
+
+-- See: https://github.com/redis/redis-specifications/issues/25
+--    , https://github.com/redis/redis-specifications/issues/23
+scanVerbatimString :: Scanner RespReply
+scanVerbatimString = do
+  len <- scanMessageSize
+  entireBlob <- Scanner.take len
+  let body = Text.decodeUtf8 $ BS8.drop 4 entireBlob
+  case BS8.take 3 entireBlob of
+    "txt" -> pure $ RespVerbatimString body
+    "mkd" -> pure $ RespVerbatimMarkdown body
+    _ -> fail "Unknown verbatim string type"
 
 -- I suspect that this can't be streamed, or null
 -- See: https://github.com/redis/redis-specifications/issues/23
@@ -74,7 +83,7 @@ scanBlobError = do
 bsContains :: Char -> ByteString -> Bool
 bsContains c = BS8.any (== c)
 
--- Make scanning to NaN a function so that we don't
+-- Scanning to NaN is a function so that we don't
 -- feel guilty about inlining the patterns
 scanLineAsNaN :: Scanner Double
 scanLineAsNaN = scanLine $> (0 / 0)
@@ -194,13 +203,16 @@ streamingBlobParts = do
 scanString :: Scanner RespReply
 scanString = RespString . Text.decodeUtf8 <$> scanLine
 
+-- Cautious interpretation, until we can clarify that the
+-- error tag is mandatory.
+-- https://github.com/redis/redis-specifications/issues/24
 scanStringError :: Scanner RespReply
 scanStringError = RespStringError . Text.decodeUtf8 <$> scanLine
 
-scanInteger :: Scanner RespReply
+scanInteger :: Integral a => Scanner a
 scanInteger = do
   c <- Scanner.anyChar8
-  RespInteger <$> case c of
+  case c of
     '+' -> parseNatural <$> scanLine
     '-' -> negate . parseNatural <$> scanLine
     _ -> parseNatural1 c <$> scanLine

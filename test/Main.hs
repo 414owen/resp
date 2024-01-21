@@ -13,7 +13,7 @@ import qualified Data.ByteString.Char8 as BS8
 import Scanner
 import Test.Tasty
 import Test.Tasty.HUnit
-import Test.Tasty.QuickCheck           (testProperty)
+import Test.Tasty.QuickCheck           (testProperty, Arbitrary)
 
 scanReply :: ByteString -> Either String RespReply
 scanReply = scanOnly reply
@@ -23,9 +23,6 @@ testStr bs expected = scanReply bs @?= Right (RespString expected)
 
 testStreamingBlob :: ByteString -> LazyByteString -> Assertion
 testStreamingBlob bs expected = scanReply bs @?= Right (RespStreamingBlob expected)
-
-testInt :: ByteString -> Int64 -> Assertion
-testInt bs expected = scanReply bs @?= Right (RespInteger expected)
 
 testArray :: ByteString -> [RespReply] -> Assertion
 testArray bs expected = scanReply bs @?= Right (RespArray expected)
@@ -38,6 +35,10 @@ testDouble' bs f = case scanReply bs of
   Right (RespDouble d) -> f d
   _ -> assertFailure "Expected to parse into a double"
 
+blobProperties :: ByteString -> String -> (ByteString -> RespReply) -> TestTree
+blobProperties leader prefix constr = testProperty "quickcheck" $ \str -> let bs = T.encodeUtf8 (T.pack $ prefix <> str) in
+  scanReply (leader <> BS8.pack (show $ BS8.length bs) <> "\r\n" <> bs <> "\r\n") == Right (constr $ BS8.drop (length prefix) bs)
+
 blobTestCases :: ByteString -> (ByteString -> RespReply) -> [TestTree]
 blobTestCases leader constr =
   [ testCase "empty" $ scanReply (leader <> "0\r\n\r\n") @?= Right (constr "")
@@ -46,8 +47,20 @@ blobTestCases leader constr =
   , testCase "unicode" $ scanReply (leader <> "11\r\n( ͡° ͜ʖ ͡°)\r\n") @?= Right (constr "( ͡° ͜ʖ ͡°)")
   , testCase "not enough bytes" $ scanReply (leader <> "10\r\nhello\r\n") @?= Left "No more input"
   , testCase "too many bytes" $ scanReply (leader <> "2\r\nhello\r\n") @?= Left "Expected '\\r', but got 'l'"
-  , testProperty "quickcheck" $ \str -> let bs = T.encodeUtf8 (T.pack str) in
-      scanReply (leader <> BS8.pack (show $ BS8.length bs) <> "\r\n" <> bs <> "\r\n") == Right (constr bs)
+  , blobProperties leader "" constr
+  ]
+
+integerTestCases :: (Arbitrary a, Num a, Show a) => ByteString -> (a -> RespReply) -> [TestTree]
+integerTestCases prefix constr =
+  -- We currently parse a zero-digit integer as 0,
+  -- even though it's technically an invalid response
+  -- in the spec. Sometimes being lenient is efficient.
+  [ testCase "empty" $ scanReply (prefix <> "\r\n") @?= Left "No more input"
+  , testCase "zero" $ scanReply (prefix <> "0\r\n") @?= Right (constr 0)
+  , testCase "one" $ scanReply (prefix <> "1\r\n") @?= Right (constr 1)
+  , testCase "forty-two" $ scanReply (prefix <> "42\r\n") @?= Right (constr 42)
+  , testCase "forty-two" $ scanReply (prefix <> "-42\r\n") @?= Right (constr (-42))
+  , testProperty "quickcheck" $ \i -> scanReply (prefix <> BS8.pack (show i) <> "\r\n") == Right (constr i)
   ]
 
 main :: IO ()
@@ -60,6 +73,11 @@ main = defaultMain $ testGroup "Tests"
   , testGroup "simple blobs" $ blobTestCases "$" RespBlob
   , testGroup "blob errors" $ blobTestCases "!" RespBlobError
 
+  , testGroup "verbatim strings"
+    [ testGroup "text" $ pure $ blobProperties "=" "txt:" (RespVerbatimString . T.decodeUtf8)
+    , testGroup "markdown" $ pure $ blobProperties "=" "mkd:" (RespVerbatimMarkdown . T.decodeUtf8)
+    ]
+
   , testGroup "streaming blob parts"
     [ testCase "empty" $ testStreamingBlob "$?\r\n;0\r\n\r\n" ""
     , testCase "one-part" $ testStreamingBlob "$?\r\n;3\r\nwow\r\n;0\r\n" "wow"
@@ -67,17 +85,8 @@ main = defaultMain $ testGroup "Tests"
     , testCase "three-part" $ testStreamingBlob "$?\r\n;4\r\nhell\r\n;3\r\no w\r\n;4\r\norld\r\n;0\r\n" "hello world"
     ]
 
-  , testGroup "integer"
-    -- We currently parse a zero-digit integer as 0,
-    -- even though it's technically an invalid response
-    -- in the spec. Sometimes being lenient is efficient.
-    [ testCase "empty" $ scanReply ":\r\n" @?= Left "No more input"
-    , testCase "zero" $ testInt ":0\r\n" 0
-    , testCase "one" $ testInt ":1\r\n" 1
-    , testCase "forty-two" $ testInt ":42\r\n" 42
-    , testCase "forty-two" $ testInt ":-42\r\n" (-42)
-    , testProperty "quickcheck" $ \i -> scanReply (":" <> BS8.pack (show i) <> "\r\n") == Right (RespInteger i)
-    ]
+  , testGroup "integer" $ integerTestCases ":" RespInteger
+  , testGroup "big integer" $ integerTestCases "(" RespBigInteger
 
   , testGroup "null"
     [ testCase "RESP2 bulk string null" $ scanReply "$-1\r\n" @?= Right RespNull
