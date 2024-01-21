@@ -30,11 +30,6 @@ import Test.Tasty
 import Test.Tasty.HUnit
 import Test.Tasty.QuickCheck           (testProperty, Arbitrary)
 
-#if !MIN_VERSION_bytestring(0,9,1)
-instance IsString BSL.ByteString where
-    fromString = packChars
-#endif
-
 parseExpr :: ByteString -> Either String RespExpr
 parseExpr = scanOnly R3.parseExpression
 
@@ -44,8 +39,8 @@ parseReply = scanOnly R3.parseReply
 testStr :: ByteString -> Text -> Assertion
 testStr bs expected = parseExpr bs @?= Right (RespString expected)
 
-testStreamingBlob :: ByteString -> BSL.ByteString -> Assertion
-testStreamingBlob bs expected = parseExpr bs @?= Right (RespStreamingBlob expected)
+testStreamingBlob :: ByteString -> ByteString -> Assertion
+testStreamingBlob bs expected = parseExpr bs @?= Right (RespStreamingBlob $ BSL.fromChunks [expected])
 
 testArray :: ByteString -> [RespExpr] -> Assertion
 testArray bs expected = parseExpr bs @?= Right (RespArray expected)
