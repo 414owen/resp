@@ -20,6 +20,8 @@ import qualified Scanner               as Scanner
 
 #if !MIN_VERSION_base(4,9,0)
 import Data.Functor
+import Control.Applicative
+import Data.Monoid
 #endif
 import Data.ByteString      (ByteString)
 import Data.Char            (digitToInt)
