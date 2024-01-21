@@ -34,7 +34,7 @@ library
     build-depends:    base >=4.3 && <5
                     , bytestring >= 0.9 && < 0.13
                     , scanner >= 0.1 && < 0.4
-                    , text >= 0.1 && < 2.1
+                    , text >= 0.1 && < 2.2
     hs-source-dirs:   src
     default-language: Haskell98
 
@@ -45,10 +45,10 @@ test-suite resp-test
     hs-source-dirs:   test
     main-is:          Main.hs
     build-depends:    base >=4.3 && <5
-                    , bytestring
+                    , bytestring >= 0.9 && < 0.13
                     , resp
-                    , scanner
-                    , tasty
-                    , tasty-hunit
-                    , tasty-quickcheck
-                    , text
+                    , scanner >= 0.1 && < 0.4
+                    , tasty >= 0.1 && < 1.6
+                    , tasty-hunit >= 0.1 && < 0.11
+                    , tasty-quickcheck >= 0.1 && < 0.11
+                    , text >= 0.1 && < 2.2
