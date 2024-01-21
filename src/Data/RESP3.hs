@@ -22,9 +22,11 @@ import Data.Int             (Int64)
 import Data.Text            (Text)
 import Scanner              (Scanner)
 import Control.Monad        (when, replicateM)
-import Data.ByteString.Lazy (LazyByteString)
 import qualified Data.ByteString.Lazy as BSL
 import Data.Functor (($>))
+
+-- This type synonym was introduced in bytestring 0.11.2.0
+type LazyByteString = BSL.ByteString
 
 -- | Top-level resp reply.
 -- Cannot be nested.
