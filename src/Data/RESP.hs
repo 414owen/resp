@@ -4,7 +4,7 @@
 {-# LANGUAGE StrictData        #-}
 {-# LANGUAGE TupleSections     #-}
 
-module Data.RESP3
+module Data.RESP
   ( RespReply(..)
   , RespExpr(..)
   , parseReply

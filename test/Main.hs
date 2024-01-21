@@ -4,8 +4,8 @@ module Main (main) where
 
 import Data.ByteString                 (ByteString)
 import Data.ByteString.Lazy            (LazyByteString)
-import Data.RESP3                      (RespReply(..), RespExpr(..))
-import qualified Data.RESP3            as R3
+import Data.RESP                       (RespReply(..), RespExpr(..))
+import qualified Data.RESP             as R3
 import qualified Data.Text.Encoding    as T
 import qualified Data.Text             as T
 import Data.Text                       (Text)

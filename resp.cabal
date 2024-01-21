@@ -30,7 +30,7 @@ common warnings
 
 library
     import:           warnings
-    exposed-modules:  Data.RESP3
+    exposed-modules:  Data.RESP
     build-depends:    base >=4.3 && <5
                     , bytestring
                     , scanner
