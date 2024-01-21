@@ -4,7 +4,6 @@ module Main (main) where
 
 import Data.ByteString                 (ByteString)
 import Data.ByteString.Lazy            (LazyByteString)
-import Data.Int                        (Int64)
 import Data.RESP3                      (reply, RespReply(..))
 import qualified Data.Text.Encoding    as T
 import qualified Data.Text             as T
@@ -107,10 +106,18 @@ main = defaultMain $ testGroup "Tests"
         "*5\r\n:1\r\n:2\r\n:3\r\n:4\r\n$5\r\nhello\r\n"
         $ map RespInteger [1..4] <> [RespBlob "hello"]
 
+    -- from website
     , testCase "nested"
       $ testArray
         "*2\r\n*3\r\n:1\r\n:2\r\n:3\r\n*2\r\n+Hello\r\n-World\r\n"
         $ RespArray <$> [RespInteger <$> [1..3], [RespString "Hello", RespStringError "World"]]
+
+    -- from markdown
+    , testCase "nested 2"
+      $ testArray
+        "*2\r\n*3\r\n:1\r\n$5\r\nhello\r\n:2\r\n#f\r\n"
+        [RespArray [RespInteger 1, RespBlob "hello", RespInteger 2], RespBool False]
+
 
     -- website: "Null arrays"
     , testCase "null" $ scanReply "*-1\r\n" @?= Right RespNull
@@ -129,27 +136,39 @@ main = defaultMain $ testGroup "Tests"
 
     ]
 
-    , testCase "null" $ scanReply "_\r\n" @?= Right RespNull
+  , testCase "null" $ scanReply "_\r\n" @?= Right RespNull
 
-    , testGroup "boolean"
-      [ testCase "true" $ scanReply "#t\r\n" @?= Right (RespBool True)
-      , testCase "false" $ scanReply "#f\r\n" @?= Right (RespBool False)
+  , testGroup "boolean"
+    [ testCase "true" $ scanReply "#t\r\n" @?= Right (RespBool True)
+    , testCase "false" $ scanReply "#f\r\n" @?= Right (RespBool False)
+    ]
+
+  , testGroup "double"
+    [ testCase "from int" $ testDouble ",42\r\n" 42
+    , testCase "with decimal pt" $ testDouble ",42.12\r\n" 42.12
+    , testCase "with exponent" $ testDouble ",42.12e2\r\n" 4212
+    , testCase "with positive exponent" $ testDouble ",42.12e+2\r\n" 4212
+    , testCase "negative with negative exponent" $ testDouble ",-42.12e-2\r\n" (-0.4212)
+
+    , testCase "inf" $ testDouble' ",inf\r\n" $ assertBool "is infinite" . isInfinite
+    , testCase "-inf" $ testDouble' ",-inf\r\n" $ \d -> do
+        assertBool "is infinite" $ isInfinite d
+        assertBool "== negate (1/0)" $ d == negate (1 / 0)
+    , testCase "nan" $ testDouble' ",nan\r\n" $ assertBool "is NaN" . isNaN
+
+    -- Looks like we can also parse all `show`n doubles
+    , testProperty "quickcheck" $ \d -> scanReply ("," <> BS8.pack (show d) <> "\r\n") == Right (RespDouble d)
+    ]
+
+  , testGroup "map"
+    [ testCase "empty" $ scanReply "%0\r\n" @?= Right (RespMap [])
+    , testCase "simple" $ scanReply "%2\r\n+first\r\n:1\r\n+second\r\n:2\r\n"
+        @?= Right (RespMap [(RespString "first", RespInteger 1), (RespString "second", RespInteger 2)])
+
+    , testGroup "streamed"
+      [ testCase "empty" $ scanReply "%?\r\n.\r\n" @?= Right (RespMap [])
+      , testCase "streamed" $ scanReply "%?\r\n+a\r\n:1\r\n+b\r\n:2\r\n.\r\n"
+          @?= Right (RespMap [(RespString "a", RespInteger 1), (RespString "b", RespInteger 2)])
       ]
-
-    , testGroup "double"
-      [ testCase "from int" $ testDouble ",42\r\n" 42
-      , testCase "with decimal pt" $ testDouble ",42.12\r\n" 42.12
-      , testCase "with exponent" $ testDouble ",42.12e2\r\n" 4212
-      , testCase "with positive exponent" $ testDouble ",42.12e+2\r\n" 4212
-      , testCase "negative with negative exponent" $ testDouble ",-42.12e-2\r\n" (-0.4212)
-
-      , testCase "inf" $ testDouble' ",inf\r\n" $ assertBool "is infinite" . isInfinite
-      , testCase "-inf" $ testDouble' ",-inf\r\n" $ \d -> do
-          assertBool "is infinite" $ isInfinite d
-          assertBool "== negate (1/0)" $ d == negate (1 / 0)
-      , testCase "nan" $ testDouble' ",nan\r\n" $ assertBool "is NaN" . isNaN
-
-      -- Looks like we can also parse all `show`n doubles
-      , testProperty "quickcheck" $ \d -> scanReply ("," <> BS8.pack (show d) <> "\r\n") == Right (RespDouble d)
-      ]
+    ]
   ]

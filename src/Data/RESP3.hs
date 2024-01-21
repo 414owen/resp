@@ -1,6 +1,8 @@
 {-# LANGUAGE ApplicativeDo     #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TupleSections #-}
+-- We don't declare any spines
+{-# LANGUAGE StrictData        #-}
+{-# LANGUAGE TupleSections     #-}
 
 module Data.RESP3
   ( RespReply(..)
@@ -36,16 +38,23 @@ data RespReply
   | RespVerbatimString Text
   | RespVerbatimMarkdown Text
   | RespBigInteger Integer
+  | RespMap [(RespReply, RespReply)]
   deriving (Show, Eq)
 
 data MessageSize
   = MSVariable
-  | MSMinusOne
   | MSFixed Int
+
+data NullableMessageSize
+  = NMSVariable
+  | NMSMinusOne
+  | NMSFixed Int
 
 reply :: Scanner RespReply
 reply = Scanner.anyChar8 >>= scanTopLevelReply
 
+-- Top level meaning it parses all the forms that start with one
+-- of the top level introducer chars. Feel free to use it elsewhere.
 scanTopLevelReply :: Char -> Scanner RespReply
 scanTopLevelReply c = case c of
   '$' -> scanBlob
@@ -59,7 +68,26 @@ scanTopLevelReply c = case c of
   '!' -> scanBlobError
   '=' -> scanVerbatimString
   '(' -> RespBigInteger <$> scanInteger
+  '%' -> RespMap <$> scanMap
   _ -> fail "Unknown reply type"
+
+scanMap :: Scanner [(RespReply, RespReply)]
+scanMap = do
+  len <- scanComplexMessageSize
+  case len of
+    MSFixed n -> replicateM n scanTwoEls
+    MSVariable -> scanVarMapPairs
+
+-- See https://github.com/redis/redis-specifications/blob/master/protocol/RESP3.md#streamed-aggregated-data-types
+scanVarMapPairs :: Scanner [(RespReply, RespReply)]
+scanVarMapPairs = do
+  c <- Scanner.anyChar8
+  case c of
+    '.' -> scanEol $> []
+    _ -> (:) <$> ((,) <$> scanTopLevelReply c <*> reply) <*> scanVarMapPairs
+
+scanTwoEls :: Scanner (RespReply, RespReply)
+scanTwoEls = (,) <$> reply <*> reply
 
 -- See: https://github.com/redis/redis-specifications/issues/25
 --    , https://github.com/redis/redis-specifications/issues/23
@@ -156,11 +184,11 @@ parseNatural1 = parseNatural' . fromIntegral . digitToInt
 -- RESP3 calls it an 'array'
 scanArray :: Scanner RespReply
 scanArray = do
-  messageSize <- scanComplexMessageSize
+  messageSize <- scanComplexNullableMessageSize
   case messageSize of
-    MSFixed n -> RespArray <$> replicateM n reply
-    MSMinusOne -> pure RespNull
-    MSVariable -> RespArray <$> scanVarArrayItems
+    NMSFixed n -> RespArray <$> replicateM n reply
+    NMSMinusOne -> pure RespNull
+    NMSVariable -> RespArray <$> scanVarArrayItems
 
 -- See https://github.com/redis/redis-specifications/blob/master/protocol/RESP3.md#streamed-aggregated-data-types
 scanVarArrayItems :: Scanner [RespReply]
@@ -174,22 +202,30 @@ scanVarArrayItems = do
 -- RESP3 calls them 'blob strings' (in the markdown, on the website they're still 'bulk strings')
 scanBlob :: Scanner RespReply
 scanBlob = do
-  ms <- scanComplexMessageSize
+  ms <- scanComplexNullableMessageSize
   case ms of
-    MSFixed n -> RespBlob <$> Scanner.take n <* scanEol
-    MSVariable -> RespStreamingBlob . BSL.fromChunks <$> streamingBlobParts
-    MSMinusOne -> pure RespNull
+    NMSFixed n -> RespBlob <$> Scanner.take n <* scanEol
+    NMSVariable -> RespStreamingBlob . BSL.fromChunks <$> streamingBlobParts
+    NMSMinusOne -> pure RespNull
 
 scanMessageSize :: Scanner Int
 scanMessageSize = parseNatural <$> scanLine
 
 -- Used for blobs and arrays
+scanComplexNullableMessageSize :: Scanner NullableMessageSize
+scanComplexNullableMessageSize = do
+  line <- scanLine
+  case line of
+    "?" -> pure NMSVariable
+    "-1" -> pure NMSMinusOne
+    _ -> pure $ NMSFixed $ parseNatural line
+
+-- Used for maps, attributes, sets
 scanComplexMessageSize :: Scanner MessageSize
 scanComplexMessageSize = do
   line <- scanLine
   case line of
     "?" -> pure MSVariable
-    "-1" -> pure MSMinusOne
     _ -> pure $ MSFixed $ parseNatural line
 
 streamingBlobParts :: Scanner [ByteString]
