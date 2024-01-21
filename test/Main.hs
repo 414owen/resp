@@ -12,8 +12,10 @@ import Control.Applicative
 # if MIN_VERSION_base(4,9,0)
 import Data.Semigroup
 import Data.Monoid (mempty)
-# else
+# elif MIN_VERSION_base(4,5,0)
 import Data.Monoid ((<>), mempty)
+# else
+import Data.Monoid (mappend, mempty)
 # endif
 #endif
 
@@ -29,6 +31,11 @@ import Scanner
 import Test.Tasty
 import Test.Tasty.HUnit
 import Test.Tasty.QuickCheck           (testProperty, Arbitrary)
+
+#if !MIN_VERSION_base(4,5,0)
+infixr 6 <>
+(<>) = mappend
+#endif
 
 parseExpr :: ByteString -> Either String RespExpr
 parseExpr = scanOnly R3.parseExpression
