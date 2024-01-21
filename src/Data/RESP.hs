@@ -1,7 +1,7 @@
 {-# LANGUAGE CPP               #-}
+{-# LANGUAGE BangPatterns      #-}
 #if MIN_VERSION_GLASGOW_HASKELL(8,0,1,0)
 {-# LANGUAGE ApplicativeDo     #-}
-{-# LANGUAGE StrictData        #-}
 #endif
 {-# LANGUAGE OverloadedStrings #-}
 -- We don't declare any spines
@@ -34,28 +34,28 @@ type LazyByteString = BSL.ByteString
 -- | Top-level resp reply.
 -- Cannot be nested.
 data RespReply
-  = RespPush ByteString [RespExpr]
-  | RespExpr RespExpr
+  = RespPush !ByteString ![RespExpr]
+  | RespExpr !RespExpr
   deriving (Show, Eq, Ord)
 
 -- | RESP3 Expression.
 data RespExpr
-  = RespString Text
-  | RespBlob ByteString
-  | RespStreamingBlob LazyByteString
-  | RespStringError Text
-  | RespBlobError ByteString
-  | RespArray [RespExpr]
-  | RespInteger Int64
+  = RespString !Text
+  | RespBlob !ByteString
+  | RespStreamingBlob !LazyByteString
+  | RespStringError !Text
+  | RespBlobError !ByteString
+  | RespArray ![RespExpr]
+  | RespInteger !Int64
   | RespNull
-  | RespBool Bool
-  | RespDouble Double
-  | RespVerbatimString Text
-  | RespVerbatimMarkdown Text
-  | RespBigInteger Integer
-  | RespMap [(RespExpr, RespExpr)]
-  | RespSet [RespExpr]
-  | RespAttribute [(RespExpr, RespExpr)] RespExpr
+  | RespBool !Bool
+  | RespDouble !Double
+  | RespVerbatimString !Text
+  | RespVerbatimMarkdown !Text
+  | RespBigInteger !Integer
+  | RespMap ![(RespExpr, RespExpr)]
+  | RespSet ![RespExpr]
+  | RespAttribute ![(RespExpr, RespExpr)] RespExpr
   deriving (Show, Eq, Ord)
 
 data MessageSize
