@@ -30,6 +30,11 @@ import Test.Tasty
 import Test.Tasty.HUnit
 import Test.Tasty.QuickCheck           (testProperty, Arbitrary)
 
+#if !MIN_VERSION_bytestring(0,9,1)
+instance IsString BSL.ByteString where
+    fromString = packChars
+#endif
+
 parseExpr :: ByteString -> Either String RespExpr
 parseExpr = scanOnly R3.parseExpression
 
