@@ -6,7 +6,9 @@
 
 module Data.RESP3
   ( RespReply(..)
-  , reply
+  , RespExpr(..)
+  , parseReply
+  , parseExpression
   ) where
 
 import qualified Data.ByteString       as BS
@@ -24,13 +26,21 @@ import Data.ByteString.Lazy (LazyByteString)
 import qualified Data.ByteString.Lazy as BSL
 import Data.Functor (($>))
 
+-- | Top-level resp reply.
+-- Cannot be nested.
 data RespReply
+  = RespPush ByteString [RespExpr]
+  | RespExpr RespExpr
+  deriving (Show, Eq, Ord)
+
+-- | RESP3 Expression.
+data RespExpr
   = RespString Text
   | RespBlob ByteString
   | RespStreamingBlob LazyByteString
   | RespStringError Text
   | RespBlobError ByteString
-  | RespArray [RespReply]
+  | RespArray [RespExpr]
   | RespInteger Int64
   | RespNull
   | RespBool Bool
@@ -38,10 +48,10 @@ data RespReply
   | RespVerbatimString Text
   | RespVerbatimMarkdown Text
   | RespBigInteger Integer
-  | RespMap [(RespReply, RespReply)]
-  | RespSet [RespReply]
-  | RespAttribute [(RespReply, RespReply)] RespReply
-  deriving (Show, Eq)
+  | RespMap [(RespExpr, RespExpr)]
+  | RespSet [RespExpr]
+  | RespAttribute [(RespExpr, RespExpr)] RespExpr
+  deriving (Show, Eq, Ord)
 
 data MessageSize
   = MSVariable
@@ -52,52 +62,81 @@ data NullableMessageSize
   | NMSMinusOne
   | NMSFixed Int
 
-reply :: Scanner RespReply
-reply = Scanner.anyChar8 >>= scanTopLevelReply
-
--- Top level meaning it parses all the forms that start with one
--- of the top level introducer chars. Feel free to use it elsewhere.
-scanTopLevelReply :: Char -> Scanner RespReply
-scanTopLevelReply c = case c of
-  '$' -> scanBlob
-  '+' -> scanString
-  '-' -> scanStringError
-  ':' -> RespInteger <$> scanInteger
-  '*' -> scanArray RespArray
-  '_' -> scanEol $> RespNull
-  '#' -> RespBool . (== 't') <$> Scanner.anyChar8 <* scanEol
-  ',' -> scanDouble
-  '!' -> scanBlobError
-  '=' -> scanVerbatimString
-  '(' -> RespBigInteger <$> scanInteger
-  '%' -> RespMap <$> scanMap
-  '~' -> scanArray RespSet
-  '|' -> RespAttribute <$> scanMap <*> reply
-  _ -> fail "Unknown reply type"
-
-scanMap :: Scanner [(RespReply, RespReply)]
-scanMap = do
-  len <- scanComplexMessageSize
-  case len of
-    MSFixed n -> replicateM n scanTwoEls
-    MSVariable -> scanVarMapPairs
-
--- See https://github.com/redis/redis-specifications/blob/master/protocol/RESP3.md#streamed-aggregated-data-types
-scanVarMapPairs :: Scanner [(RespReply, RespReply)]
-scanVarMapPairs = do
+-- Top level RESP item
+parseReply :: Scanner RespReply
+parseReply = do
   c <- Scanner.anyChar8
   case c of
-    '.' -> scanEol $> []
-    _ -> (:) <$> ((,) <$> scanTopLevelReply c <*> reply) <*> scanVarMapPairs
+    '>' -> parsePush
+    _ -> RespExpr <$> parseExpression' c
 
-scanTwoEls :: Scanner (RespReply, RespReply)
-scanTwoEls = (,) <$> reply <*> reply
+-- Non-top-level resp item
+parseExpression :: Scanner RespExpr
+parseExpression = Scanner.anyChar8 >>= parseExpression'
+
+-- Non-top-level resp item, taking its first char as a parameter
+parseExpression' :: Char -> Scanner RespExpr
+parseExpression' c = case c of
+  '$' -> parseBlob
+  '+' -> parseString
+  '-' -> parseStringError
+  ':' -> RespInteger <$> parseInteger
+  '*' -> parseArray RespArray
+  '_' -> parseEol $> RespNull
+  '#' -> RespBool . (== 't') <$> Scanner.anyChar8 <* parseEol
+  ',' -> parseDouble
+  '!' -> parseBlobError
+  '=' -> parseVerbatimString
+  '(' -> RespBigInteger <$> parseInteger
+  '%' -> RespMap <$> parseMap
+  '~' -> parseArray RespSet
+  '|' -> RespAttribute <$> parseMap <*> parseExpression
+  _ -> fail "Unknown reply type"
+
+parsePush :: Scanner RespReply
+parsePush = do
+  len <- parseMessageSize
+  RespPush <$> parsePushType <*> replicateM (pred len) parseExpression
+
+parsePushType :: Scanner ByteString
+parsePushType = do
+  c <- Scanner.anyChar8
+  -- No idea whether this can be a simple string or not,
+  -- the spec isn't specific enough.
+  --
+  -- The spec doesn't say that the push type *can't* be a
+  -- streamed blob string (or null), but let's face it, only a sadist would
+  -- return one of those. I'll try to get these possibilities excluded from
+  -- the spec, but in the meantime, we're going to have to parse all the
+  -- blobstrings.
+  case c of
+    '$' -> parseBlob' id BSL.toStrict $ fail "Push message type can't be null"
+    '+' -> parseLine
+    _ -> fail "Invalid push message type"
+
+parseMap :: Scanner [(RespExpr, RespExpr)]
+parseMap = do
+  len <- parseComplexMessageSize
+  case len of
+    MSFixed n -> replicateM n parseTwoEls
+    MSVariable -> parseVarMapPairs
+
+-- See https://github.com/redis/redis-specifications/blob/master/protocol/RESP3.md#streamed-aggregated-data-types
+parseVarMapPairs :: Scanner [(RespExpr, RespExpr)]
+parseVarMapPairs = do
+  c <- Scanner.anyChar8
+  case c of
+    '.' -> parseEol $> []
+    _ -> (:) <$> ((,) <$> parseExpression' c <*> parseExpression) <*> parseVarMapPairs
+
+parseTwoEls :: Scanner (RespExpr, RespExpr)
+parseTwoEls = (,) <$> parseExpression <*> parseExpression
 
 -- See: https://github.com/redis/redis-specifications/issues/25
 --    , https://github.com/redis/redis-specifications/issues/23
-scanVerbatimString :: Scanner RespReply
-scanVerbatimString = do
-  len <- scanMessageSize
+parseVerbatimString :: Scanner RespExpr
+parseVerbatimString = do
+  len <- parseMessageSize
   entireBlob <- Scanner.take len
   let body = Text.decodeUtf8 $ BS8.drop 4 entireBlob
   case BS8.take 3 entireBlob of
@@ -107,29 +146,29 @@ scanVerbatimString = do
 
 -- I suspect that this can't be streamed, or null
 -- See: https://github.com/redis/redis-specifications/issues/23
-scanBlobError :: Scanner RespReply
-scanBlobError = do
-  len <- scanMessageSize
-  RespBlobError <$> Scanner.take len <* scanEol
+parseBlobError :: Scanner RespExpr
+parseBlobError = do
+  len <- parseMessageSize
+  RespBlobError <$> Scanner.take len <* parseEol
 
 bsContains :: Char -> ByteString -> Bool
 bsContains c = BS8.any (== c)
 
 -- Scanning to NaN is a function so that we don't
 -- feel guilty about inlining the patterns
-scanLineAsNaN :: Scanner Double
-scanLineAsNaN = scanLine $> (0 / 0)
+parseLineAsNaN :: Scanner Double
+parseLineAsNaN = parseLine $> (0 / 0)
 
-scanLineAsInf :: Scanner Double
-scanLineAsInf = scanLine $> (1 / 0)
+parseLineAsInf :: Scanner Double
+parseLineAsInf = parseLine $> (1 / 0)
 
 -- (inf|-inf|nan|(+|-)?\d+(\.\d+)?([eE](+|-)?\d+))
 --
 -- Due to Redis bugs prior to 7.2, we also have to deal with
 -- /(-)?nan(\(.*\))?/i, even though they're not part of the
 -- RESP spec...
-scanDouble :: Scanner RespReply
-scanDouble = do
+parseDouble :: Scanner RespExpr
+parseDouble = do
   c <- Scanner.anyChar8
   RespDouble <$> case c of
     '+' -> go1 =<< Scanner.anyChar8
@@ -138,17 +177,17 @@ scanDouble = do
       -- Note: We're not validating that the rest of the line
       -- is actually "nf", because `,i` uniquely determines the
       -- set of valid responses.
-      scanLineAsInf
-    'n' -> scanLineAsNaN
-    'N' -> scanLineAsNaN
+      parseLineAsInf
+    'n' -> parseLineAsNaN
+    'N' -> parseLineAsNaN
     _ -> go1 c
 
   where
     -- takes first non-sign char of the significand
     go1 :: Char -> Scanner Double
-    go1 'i' = scanLineAsInf
-    go1 'n' = scanLineAsNaN
-    go1 'N' = scanLineAsNaN
+    go1 'i' = parseLineAsInf
+    go1 'n' = parseLineAsNaN
+    go1 'N' = parseLineAsNaN
     go1 c1 = fromRational <$> do
       decStr <- Scanner.takeWhileChar8 $ not . (`bsContains` ".\reE")
       let dec = parseNatural1 c1 decStr :: Integer
@@ -169,9 +208,9 @@ scanDouble = do
     go2 n = do
       c <- Scanner.anyChar8
       (negExp, exponent') <- case c of
-        '-' -> (True,) . parseNatural <$> scanLine
-        '+' -> (False,) . parseNatural <$> scanLine
-        _ {- isDigit c -} -> (False,) . parseNatural1 c <$> scanLine
+        '-' -> (True,) . parseNatural <$> parseLine
+        '+' -> (False,) . parseNatural <$> parseLine
+        _ {- isDigit c -} -> (False,) . parseNatural1 c <$> parseLine
       let expMul = fromIntegral (10 ^ (exponent' :: Integer) :: Integer) :: Rational
       pure $ if negExp then n / expMul else n * expMul
 
@@ -189,48 +228,56 @@ parseNatural1 = parseNatural' . fromIntegral . digitToInt
 --
 -- This is used to parse arrays and sets, meaning that we parse
 -- "~-1\r\n" as RespNull, although this isn't a valid form in the spec.
-scanArray :: ([RespReply] -> RespReply) -> Scanner RespReply
-scanArray construct = do
-  messageSize <- scanComplexNullableMessageSize
+parseArray :: ([RespExpr] -> RespExpr) -> Scanner RespExpr
+parseArray construct = do
+  messageSize <- parseComplexNullableMessageSize
   case messageSize of
-    NMSFixed n -> construct <$> replicateM n reply
+    NMSFixed n -> construct <$> replicateM n parseExpression
     NMSMinusOne -> pure RespNull
-    NMSVariable -> construct <$> scanVarArrayItems
+    NMSVariable -> construct <$> parseVarArrayItems
 
 -- See https://github.com/redis/redis-specifications/blob/master/protocol/RESP3.md#streamed-aggregated-data-types
-scanVarArrayItems :: Scanner [RespReply]
-scanVarArrayItems = do
+parseVarArrayItems :: Scanner [RespExpr]
+parseVarArrayItems = do
   c <- Scanner.anyChar8
   case c of
-    '.' -> scanEol $> []
-    _ -> (:) <$> scanTopLevelReply c <*> scanVarArrayItems
+    '.' -> parseEol $> []
+    _ -> (:) <$> parseExpression' c <*> parseVarArrayItems
 
 -- RESP2 calls these 'bulk strings'
 -- RESP3 calls them 'blob strings' (in the markdown, on the website they're still 'bulk strings')
-scanBlob :: Scanner RespReply
-scanBlob = do
-  ms <- scanComplexNullableMessageSize
-  case ms of
-    NMSFixed n -> RespBlob <$> Scanner.take n <* scanEol
-    NMSVariable -> RespStreamingBlob . BSL.fromChunks <$> streamingBlobParts
-    NMSMinusOne -> pure RespNull
+parseBlob :: Scanner RespExpr
+parseBlob = parseBlob' RespBlob RespStreamingBlob $ pure RespNull
 
-scanMessageSize :: Scanner Int
-scanMessageSize = parseNatural <$> scanLine
+-- general case for something that's pretty blobstring-like
+parseBlob'
+  :: (ByteString -> a)
+  -> (LazyByteString -> a)
+  -> Scanner a
+  -> Scanner a
+parseBlob' strictConstr lazyConstr nullConstr = do
+  ms <- parseComplexNullableMessageSize
+  case ms of
+    NMSFixed n -> strictConstr <$> Scanner.take n <* parseEol
+    NMSVariable -> lazyConstr . BSL.fromChunks <$> streamingBlobParts
+    NMSMinusOne -> nullConstr
+
+parseMessageSize :: Scanner Int
+parseMessageSize = parseNatural <$> parseLine
 
 -- Used for blobs and arrays
-scanComplexNullableMessageSize :: Scanner NullableMessageSize
-scanComplexNullableMessageSize = do
-  line <- scanLine
+parseComplexNullableMessageSize :: Scanner NullableMessageSize
+parseComplexNullableMessageSize = do
+  line <- parseLine
   case line of
     "?" -> pure NMSVariable
     "-1" -> pure NMSMinusOne
     _ -> pure $ NMSFixed $ parseNatural line
 
 -- Used for maps, attributes, sets
-scanComplexMessageSize :: Scanner MessageSize
-scanComplexMessageSize = do
-  line <- scanLine
+parseComplexMessageSize :: Scanner MessageSize
+parseComplexMessageSize = do
+  line <- parseLine
   case line of
     "?" -> pure MSVariable
     _ -> pure $ MSFixed $ parseNatural line
@@ -238,37 +285,37 @@ scanComplexMessageSize = do
 streamingBlobParts :: Scanner [ByteString]
 streamingBlobParts = do
   expectChar ';'
-  ms <- scanMessageSize
+  ms <- parseMessageSize
   case ms of
     0 -> pure mempty
-    n -> (:) <$> Scanner.take n <* scanEol <*> streamingBlobParts
+    n -> (:) <$> Scanner.take n <* parseEol <*> streamingBlobParts
 
-scanString :: Scanner RespReply
-scanString = RespString . Text.decodeUtf8 <$> scanLine
+parseString :: Scanner RespExpr
+parseString = RespString . Text.decodeUtf8 <$> parseLine
 
 -- Cautious interpretation, until we can clarify that the
 -- error tag is mandatory.
 -- https://github.com/redis/redis-specifications/issues/24
-scanStringError :: Scanner RespReply
-scanStringError = RespStringError . Text.decodeUtf8 <$> scanLine
+parseStringError :: Scanner RespExpr
+parseStringError = RespStringError . Text.decodeUtf8 <$> parseLine
 
-scanInteger :: Integral a => Scanner a
-scanInteger = do
+parseInteger :: Integral a => Scanner a
+parseInteger = do
   c <- Scanner.anyChar8
   case c of
-    '+' -> parseNatural <$> scanLine
-    '-' -> negate . parseNatural <$> scanLine
-    _ -> parseNatural1 c <$> scanLine
+    '+' -> parseNatural <$> parseLine
+    '-' -> negate . parseNatural <$> parseLine
+    _ -> parseNatural1 c <$> parseLine
 
-scanLine :: Scanner ByteString
-scanLine = Scanner.takeWhileChar8 (/= '\r') <* scanEol
+parseLine :: Scanner ByteString
+parseLine = Scanner.takeWhileChar8 (/= '\r') <* parseEol
 
 expectChar :: Char -> Scanner ()
 expectChar c = do
   d <- Scanner.anyChar8
   when (c /= d) $ fail $ "Expected " <> show c <> ", but got " <> show d
 
-scanEol :: Scanner ()
-scanEol = do
+parseEol :: Scanner ()
+parseEol = do
   expectChar '\r'
   expectChar '\n'
