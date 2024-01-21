@@ -1,6 +1,16 @@
+{-# LANGUAGE CPP               #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Main (main) where
+
+#if !MIN_VERSION_base(4,11,0)
+# if MIN_VERSION_base(4,9,0)
+import Data.Semigroup
+import Data.Monoid (mempty)
+# else
+import Data.Monoid ((<>), mempty)
+# endif
+#endif
 
 import Data.ByteString                 (ByteString)
 import Data.RESP                       (RespReply(..), RespExpr(..))
