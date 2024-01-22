@@ -15,7 +15,6 @@ module Data.RESP
 import qualified Data.ByteString       as BS
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.ByteString.Lazy  as BSL
-import qualified Data.Text.Encoding    as Text
 import qualified Scanner               as Scanner
 
 #if !MIN_VERSION_base(4,8,0)
@@ -35,7 +34,6 @@ import Data.Monoid ((<>), mempty)
 import Data.ByteString      (ByteString)
 import Data.Char            (digitToInt)
 import Data.Int             (Int64)
-import Data.Text            (Text)
 import Scanner              (Scanner)
 import Control.Monad        (when, replicateM)
 
@@ -58,19 +56,42 @@ data RespReply
   deriving (Show, Eq, Ord)
 
 -- | RESP3 Expression.
+--
+-- This descriminates the difference between RespString and RespBlob,
+-- even though both contain bytestrings, in order to not throw away
+-- information. A caller might care whether the response was delivered
+-- with "+", or "$".
+--
+-- We do not, however descriminate between the different encodings of
+-- null. As far as I can tell, these are considered a mistake in the
+-- previous versions of the RESP spec, and clients should treat the
+-- different encodings the same.
+--
+-- Why don't we parse `RespString` into `Text`? Well, the caller might
+-- not actually need to decode it into text, and so we let the caller
+-- decide. This way, we don't have to deal with encoding errors.
+--
+-- Similarly, we don't parse a `RespMap` into a `HashMap`, because
+-- that would involve imposing our choice of data structure on the caller.
+-- They might want to use `HashMap`, `Map`, or just use the `lookup`
+-- function.
+--
+-- Given these choices, our purview is simple: Parse the text protocol
+-- into a Haskell datatype, maintaining all useful information, and not
+-- imposing our taste onto the caller.
 data RespExpr
-  = RespString !Text
+  = RespString !ByteString
   | RespBlob !ByteString
   | RespStreamingBlob !LazyByteString
-  | RespStringError !Text
+  | RespStringError !ByteString
   | RespBlobError !ByteString
   | RespArray ![RespExpr]
   | RespInteger !Int64
   | RespNull
   | RespBool !Bool
   | RespDouble !Double
-  | RespVerbatimString !Text
-  | RespVerbatimMarkdown !Text
+  | RespVerbatimString !ByteString
+  | RespVerbatimMarkdown !ByteString
   | RespBigInteger !Integer
   | RespMap ![(RespExpr, RespExpr)]
   | RespSet ![RespExpr]
@@ -162,7 +183,7 @@ parseVerbatimString :: Scanner RespExpr
 parseVerbatimString = do
   len <- parseMessageSize
   entireBlob <- Scanner.take len
-  let body = Text.decodeUtf8 $ BS8.drop 4 entireBlob
+  let body = BS8.drop 4 entireBlob
   parseEol
   case BS8.take 3 entireBlob of
     "txt" -> pure $ RespVerbatimString body
@@ -316,13 +337,13 @@ streamingBlobParts = do
     n -> (:) <$> Scanner.take n <* parseEol <*> streamingBlobParts
 
 parseString :: Scanner RespExpr
-parseString = RespString . Text.decodeUtf8 <$> parseLine
+parseString = RespString <$> parseLine
 
 -- Cautious interpretation, until we can clarify that the
 -- error tag is mandatory.
 -- https://github.com/redis/redis-specifications/issues/24
 parseStringError :: Scanner RespExpr
-parseStringError = RespStringError . Text.decodeUtf8 <$> parseLine
+parseStringError = RespStringError <$> parseLine
 
 parseInteger :: Integral a => Scanner a
 parseInteger = do

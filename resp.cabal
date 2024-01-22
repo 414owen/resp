@@ -55,4 +55,4 @@ test-suite resp-test
                     , tasty >= 0.1 && < 1.6
                     , tasty-hunit >= 0.1 && < 0.11
                     , tasty-quickcheck >= 0.1 && < 0.11
-                    , text >= 0.1 && < 2.2
+                    , utf8-string >= 0.3 && < 2

@@ -19,10 +19,11 @@ import Data.Monoid ((<>), mempty)
 
 import Data.ByteString                 (ByteString)
 import Data.RESP                       (RespReply(..), RespExpr(..))
+import qualified Data.ByteString.UTF8  as BSU
 import qualified Data.RESP             as R3
-import qualified Data.Text.Encoding    as T
-import qualified Data.Text             as T
-import Data.Text                       (Text)
+-- import qualified Data.Text.Encoding    as T
+-- import qualified Data.Text             as T
+-- import Data.Text                       (Text)
 import qualified Data.ByteString       as BS
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.ByteString.Lazy  as BSL
@@ -32,17 +33,14 @@ import Test.Tasty.HUnit
 import Test.Tasty.QuickCheck           (testProperty, Arbitrary(..), Gen, (===))
 import qualified Test.Tasty.QuickCheck as QC
 
-arbText :: Gen Text
-arbText = T.pack <$> arbitrary
+arbText :: Gen ByteString
+arbText = BSU.fromString <$> arbitrary
 
 arbBs :: Gen ByteString
 arbBs = BS.pack <$> arbitrary
 
 arbBsl :: Gen BSL.ByteString
 arbBsl = BSL.pack <$> arbitrary
-
-shrinkText :: Text -> [Text]
-shrinkText = fmap T.pack . shrink . T.unpack
 
 shrinkBs :: ByteString -> [ByteString]
 shrinkBs = fmap BS.pack . shrink . BS.unpack
@@ -53,8 +51,8 @@ shrinkBsl = fmap BSL.pack . shrink . BSL.unpack
 halfArbitrary :: Arbitrary a => Int -> Gen a
 halfArbitrary n = QC.resize (n `div` 2) arbitrary
 
-genLine :: Gen Text
-genLine = fmap T.pack $ QC.listOf $ QC.suchThat arbitrary (not . (`elem` ("\r\n" :: String)))
+genLine :: Gen ByteString
+genLine = fmap BSU.fromString $ QC.listOf $ QC.suchThat arbitrary (not . (`elem` ("\r\n" :: String)))
 
 -- If you want access to this instance, please make a PR
 -- to create a cabal sublibrary called `resp-quickcheck`.
@@ -96,17 +94,17 @@ instance Arbitrary RespExpr where
       ]
 
   shrink expr = case expr of
-    RespString a -> RespString <$> shrinkText a
+    RespString a -> RespString <$> shrinkBs a
     RespBlob a -> RespBlob <$> shrinkBs a
     RespStreamingBlob a -> RespStreamingBlob <$> shrinkBsl a
-    RespStringError a -> RespStringError <$> shrinkText a
+    RespStringError a -> RespStringError <$> shrinkBs a
     RespBlobError a -> RespBlobError <$> shrinkBs a
     RespArray a -> RespArray <$> shrink a
     RespInteger a -> RespInteger <$> shrink a
     RespBool a -> RespBool <$> shrink a
     RespDouble a -> RespDouble <$> shrink a
-    RespVerbatimString a -> RespVerbatimString <$> shrinkText a
-    RespVerbatimMarkdown a -> RespVerbatimMarkdown <$> shrinkText a
+    RespVerbatimString a -> RespVerbatimString <$> shrinkBs a
+    RespVerbatimMarkdown a -> RespVerbatimMarkdown <$> shrinkBs a
     RespBigInteger a -> RespBigInteger <$> shrink a
     RespMap a -> RespMap <$> shrink a
     RespSet a -> RespSet <$> shrink a
@@ -123,7 +121,7 @@ instance Arbitrary RespReply where
     RespExpr a -> RespExpr <$> shrink a
 
 showBs :: Show a => a -> ByteString
-showBs = T.encodeUtf8 . T.pack . show
+showBs = BSU.fromString . show
 
 eol :: ByteString
 eol = "\r\n"
@@ -136,11 +134,11 @@ encodeExpr = BS.concat . encodeExpr'
 
 encodeExpr' :: RespExpr -> [ByteString]
 encodeExpr' e = case e of 
-  RespString txt -> ["+", T.encodeUtf8 txt, eol]
+  RespString txt -> ["+", txt, eol]
   RespBlob bs -> ["$", showBs $ BS.length bs, eol, bs, eol]
   RespStreamingBlob "" -> ["$?\r\n;0\r\n"]
   RespStreamingBlob bs -> ["$?\r\n", ";", showBs $ BSL.length bs, eol, toStrictBs bs, "\r\n;0\r\n"]
-  RespStringError txt -> ["-", T.encodeUtf8 txt, eol]
+  RespStringError txt -> ["-", txt, eol]
   RespBlobError bs -> ["!", showBs $ BS.length bs, eol, bs, eol]
   RespArray els -> ["*", showBs $ length els, eol] <> concatMap encodeExpr' els
   RespInteger n -> [":", showBs $ n, eol]
@@ -148,9 +146,9 @@ encodeExpr' e = case e of
   RespBool True -> ["#t\r\n"]
   RespBool False -> ["#f\r\n"]
   RespDouble n -> [",", showBs n, eol]
-  RespVerbatimString txt -> let bs = T.encodeUtf8 txt in
+  RespVerbatimString txt -> let bs = txt in
     ["=", showBs $ 4 + BS.length bs, eol, "txt:", bs, eol]
-  RespVerbatimMarkdown txt -> let bs = T.encodeUtf8 txt in
+  RespVerbatimMarkdown txt -> let bs = txt in
     ["=", showBs $ 4 + BS.length bs, eol, "mkd:", bs, eol]
   RespBigInteger n -> ["(", showBs n, eol]
   RespMap els -> ["%", showBs $ length els, eol] <> concatMap encodeTup els
@@ -173,7 +171,7 @@ parseExpr = scanOnly R3.parseExpression
 parseReply :: ByteString -> Either String RespReply
 parseReply = scanOnly R3.parseReply
 
-testStr :: ByteString -> Text -> Assertion
+testStr :: ByteString -> ByteString -> Assertion
 testStr bs expected = parseExpr bs @?= Right (RespString expected)
 
 testStreamingBlob :: ByteString -> ByteString -> Assertion
@@ -191,7 +189,7 @@ testDouble' bs f = case parseExpr bs of
   _ -> assertFailure "Expected to parse into a double"
 
 blobProperties :: ByteString -> String -> (ByteString -> RespExpr) -> TestTree
-blobProperties leader prefix constr = testProperty "quickcheck" $ \str -> let bs = T.encodeUtf8 (T.pack $ prefix <> str) in
+blobProperties leader prefix constr = testProperty "quickcheck" $ \str -> let bs = BSU.fromString $ prefix <> str in
   parseExpr (leader <> BS8.pack (show $ BS8.length bs) <> "\r\n" <> bs <> "\r\n") === Right (constr $ BS8.drop (length prefix) bs)
 
 blobTestCases :: ByteString -> (ByteString -> RespExpr) -> [TestTree]
@@ -229,8 +227,8 @@ main = defaultMain $ testGroup "Tests"
   , testGroup "blob errors" $ blobTestCases "!" RespBlobError
 
   , testGroup "verbatim strings"
-    [ testGroup "text" $ pure $ blobProperties "=" "txt:" (RespVerbatimString . T.decodeUtf8)
-    , testGroup "markdown" $ pure $ blobProperties "=" "mkd:" (RespVerbatimMarkdown . T.decodeUtf8)
+    [ testGroup "text" $ pure $ blobProperties "=" "txt:" RespVerbatimString
+    , testGroup "markdown" $ pure $ blobProperties "=" "mkd:" RespVerbatimMarkdown
     ]
 
   , testGroup "streaming blob parts"
