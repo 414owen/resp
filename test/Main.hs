@@ -23,12 +23,149 @@ import qualified Data.RESP             as R3
 import qualified Data.Text.Encoding    as T
 import qualified Data.Text             as T
 import Data.Text                       (Text)
+import qualified Data.ByteString       as BS
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.ByteString.Lazy  as BSL
 import Scanner
 import Test.Tasty
 import Test.Tasty.HUnit
-import Test.Tasty.QuickCheck           (testProperty, Arbitrary)
+import Test.Tasty.QuickCheck           (testProperty, Arbitrary(..), Gen, (===))
+import qualified Test.Tasty.QuickCheck as QC
+
+arbText :: Gen Text
+arbText = T.pack <$> arbitrary
+
+arbBs :: Gen ByteString
+arbBs = BS.pack <$> arbitrary
+
+arbBsl :: Gen BSL.ByteString
+arbBsl = BSL.pack <$> arbitrary
+
+shrinkText :: Text -> [Text]
+shrinkText = fmap T.pack . shrink . T.unpack
+
+shrinkBs :: ByteString -> [ByteString]
+shrinkBs = fmap BS.pack . shrink . BS.unpack
+
+shrinkBsl :: BSL.ByteString -> [BSL.ByteString]
+shrinkBsl = fmap BSL.pack . shrink . BSL.unpack
+
+halfArbitrary :: Arbitrary a => Int -> Gen a
+halfArbitrary n = QC.resize (n `div` 2) arbitrary
+
+genLine :: Gen Text
+genLine = fmap T.pack $ QC.listOf $ QC.suchThat arbitrary (not . (`elem` ("\r\n" :: String)))
+
+-- If you want access to this instance, please make a PR
+-- to create a cabal sublibrary called `resp-quickcheck`.
+-- This will avoid adding `quickcheck` as a dependency of
+-- the main `resp` library.
+instance Arbitrary RespExpr where
+  arbitrary = QC.sized $ \n -> case n of
+    _ | n <= 1 -> QC.oneof
+      [ RespString <$> genLine
+      , RespBlob <$> arbBs
+      , RespStreamingBlob <$> arbBsl
+      , RespStringError <$> genLine
+      , RespBlobError <$> arbBs
+      , RespInteger <$> arbitrary
+      , pure RespNull
+      , RespBool <$> arbitrary
+      , RespDouble <$> arbitrary
+      , RespVerbatimString <$> arbText
+      , RespVerbatimMarkdown <$> arbText
+      , RespBigInteger <$> arbitrary
+      ]
+    _ -> QC.oneof
+      [ RespString <$> genLine
+      , RespBlob <$> arbBs
+      , RespStreamingBlob <$> arbBsl
+      , RespStringError <$> genLine
+      , RespBlobError <$> arbBs
+      , RespInteger <$> arbitrary
+      , pure RespNull
+      , RespBool <$> arbitrary
+      , RespDouble <$> arbitrary
+      , RespVerbatimString <$> arbText
+      , RespVerbatimMarkdown <$> arbText
+      , RespBigInteger <$> arbitrary
+      , RespArray <$> halfArbitrary n
+      , RespMap <$> halfArbitrary n
+      , RespSet <$> halfArbitrary n
+      , RespAttribute <$> halfArbitrary n <*> halfArbitrary n
+      ]
+
+  shrink expr = case expr of
+    RespString a -> RespString <$> shrinkText a
+    RespBlob a -> RespBlob <$> shrinkBs a
+    RespStreamingBlob a -> RespStreamingBlob <$> shrinkBsl a
+    RespStringError a -> RespStringError <$> shrinkText a
+    RespBlobError a -> RespBlobError <$> shrinkBs a
+    RespArray a -> RespArray <$> shrink a
+    RespInteger a -> RespInteger <$> shrink a
+    RespBool a -> RespBool <$> shrink a
+    RespDouble a -> RespDouble <$> shrink a
+    RespVerbatimString a -> RespVerbatimString <$> shrinkText a
+    RespVerbatimMarkdown a -> RespVerbatimMarkdown <$> shrinkText a
+    RespBigInteger a -> RespBigInteger <$> shrink a
+    RespMap a -> RespMap <$> shrink a
+    RespSet a -> RespSet <$> shrink a
+    RespNull -> []
+    RespAttribute a b -> RespAttribute <$> shrink a <*> shrink b
+
+instance Arbitrary RespReply where
+  arbitrary = QC.oneof
+    [ RespPush <$> arbBs <*> arbitrary
+    , RespExpr <$> arbitrary
+    ]
+  shrink reply = case reply of
+    RespPush a b -> RespPush <$> shrinkBs a <*> shrink b
+    RespExpr a -> RespExpr <$> shrink a
+
+showBs :: Show a => a -> ByteString
+showBs = T.encodeUtf8 . T.pack . show
+
+eol :: ByteString
+eol = "\r\n"
+
+toStrictBs :: BSL.ByteString -> ByteString
+toStrictBs = BS.concat . BSL.toChunks
+
+encodeExpr :: RespExpr -> ByteString
+encodeExpr = BS.concat . encodeExpr'
+
+encodeExpr' :: RespExpr -> [ByteString]
+encodeExpr' e = case e of 
+  RespString txt -> ["+", T.encodeUtf8 txt, eol]
+  RespBlob bs -> ["$", showBs $ BS.length bs, eol, bs, eol]
+  RespStreamingBlob "" -> ["$?\r\n;0\r\n"]
+  RespStreamingBlob bs -> ["$?\r\n", ";", showBs $ BSL.length bs, eol, toStrictBs bs, "\r\n;0\r\n"]
+  RespStringError txt -> ["-", T.encodeUtf8 txt, eol]
+  RespBlobError bs -> ["!", showBs $ BS.length bs, eol, bs, eol]
+  RespArray els -> ["*", showBs $ length els, eol] <> concatMap encodeExpr' els
+  RespInteger n -> [":", showBs $ n, eol]
+  RespNull -> ["_\r\n"]
+  RespBool True -> ["#t\r\n"]
+  RespBool False -> ["#f\r\n"]
+  RespDouble n -> [",", showBs n, eol]
+  RespVerbatimString txt -> let bs = T.encodeUtf8 txt in
+    ["=", showBs $ 4 + BS.length bs, eol, "txt:", bs, eol]
+  RespVerbatimMarkdown txt -> let bs = T.encodeUtf8 txt in
+    ["=", showBs $ 4 + BS.length bs, eol, "mkd:", bs, eol]
+  RespBigInteger n -> ["(", showBs n, eol]
+  RespMap els -> ["%", showBs $ length els, eol] <> concatMap encodeTup els
+  RespSet els -> ["~", showBs $ length els, eol] <> concatMap encodeExpr' els
+  RespAttribute attrs expr ->
+    ["|", showBs $ length attrs, eol] <> concatMap encodeTup attrs <> encodeExpr' expr
+
+encodeTup :: (RespExpr, RespExpr) -> [ByteString]
+encodeTup (a, b) = concatMap encodeExpr' [a, b]
+
+encodeReply :: RespReply -> ByteString
+encodeReply repl = BS.concat $ case repl of
+  RespPush t msgs -> [">", showBs $ succ $ length msgs, eol, "$", showBs $ BS.length t, eol, t, eol]
+    <> concatMap encodeExpr' msgs
+  RespExpr e -> encodeExpr' e
 
 parseExpr :: ByteString -> Either String RespExpr
 parseExpr = scanOnly R3.parseExpression
@@ -55,7 +192,7 @@ testDouble' bs f = case parseExpr bs of
 
 blobProperties :: ByteString -> String -> (ByteString -> RespExpr) -> TestTree
 blobProperties leader prefix constr = testProperty "quickcheck" $ \str -> let bs = T.encodeUtf8 (T.pack $ prefix <> str) in
-  parseExpr (leader <> BS8.pack (show $ BS8.length bs) <> "\r\n" <> bs <> "\r\n") == Right (constr $ BS8.drop (length prefix) bs)
+  parseExpr (leader <> BS8.pack (show $ BS8.length bs) <> "\r\n" <> bs <> "\r\n") === Right (constr $ BS8.drop (length prefix) bs)
 
 blobTestCases :: ByteString -> (ByteString -> RespExpr) -> [TestTree]
 blobTestCases leader constr =
@@ -233,4 +370,7 @@ main = defaultMain $ testGroup "Tests"
     , testCase "blob string els" $ parseReply ">3\r\n$7\r\nmessage\r\n$6\r\nsecond\r\n$5\r\nHello\r\n"
         @?= Right (RespPush "message" [RespBlob "second", RespBlob "Hello"])
     ]
+
+  , testProperty "roundtrip expr" $ \ex -> parseExpr (encodeExpr ex) === Right ex
+  , testProperty "roundtrip reply" $ \reply -> parseReply (encodeReply reply) === Right reply
   ]

@@ -115,7 +115,7 @@ parseExpression' c = case c of
   '%' -> RespMap <$> parseMap
   '~' -> parseArray RespSet
   '|' -> RespAttribute <$> parseMap <*> parseExpression
-  _ -> fail "Unknown reply type"
+  _ -> fail $ "Unknown expression prefix: " <> show c
 
 parsePush :: Scanner RespReply
 parsePush = do
@@ -163,6 +163,7 @@ parseVerbatimString = do
   len <- parseMessageSize
   entireBlob <- Scanner.take len
   let body = Text.decodeUtf8 $ BS8.drop 4 entireBlob
+  parseEol
   case BS8.take 3 entireBlob of
     "txt" -> pure $ RespVerbatimString body
     "mkd" -> pure $ RespVerbatimMarkdown body
