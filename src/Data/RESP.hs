@@ -4,6 +4,7 @@
 #endif
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TupleSections     #-}
+{-# LANGUAGE DeriveGeneric #-}
 
 module Data.RESP
   ( RespReply(..)
@@ -36,6 +37,7 @@ import Data.Char            (digitToInt)
 import Data.Int             (Int64)
 import Scanner              (Scanner)
 import Control.Monad        (when, replicateM)
+import GHC.Generics         (Generic)
 
 -- This type synonym was introduced in bytestring 0.11.2.0
 type LazyByteString = BSL.ByteString
@@ -53,7 +55,7 @@ lazyBsToStrict = BS.concat . BSL.toChunks
 data RespReply
   = RespPush !ByteString ![RespExpr]
   | RespExpr !RespExpr
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic)
 
 -- | RESP3 Expression.
 --
@@ -96,7 +98,7 @@ data RespExpr
   | RespMap ![(RespExpr, RespExpr)]
   | RespSet ![RespExpr]
   | RespAttribute ![(RespExpr, RespExpr)] RespExpr
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic)
 
 data MessageSize
   = MSVariable
