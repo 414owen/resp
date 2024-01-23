@@ -37,6 +37,8 @@ library
     build-depends:    base >=4.3 && <5
                     , bytestring >= 0.9 && < 0.13
                     , scanner >= 0.1 && < 0.4
+    if(impl(ghc < 7.6))
+      build-depends:    ghc-prim
     hs-source-dirs:   src
     default-language: Haskell98
 
