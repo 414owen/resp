@@ -136,8 +136,9 @@ encodeExpr' :: RespExpr -> [ByteString]
 encodeExpr' e = case e of 
   RespString txt -> ["+", txt, eol]
   RespBlob bs -> ["$", showBs $ BS.length bs, eol, bs, eol]
-  RespStreamingBlob "" -> ["$?\r\n;0\r\n"]
-  RespStreamingBlob bs -> ["$?\r\n", ";", showBs $ BSL.length bs, eol, toStrictBs bs, "\r\n;0\r\n"]
+  RespStreamingBlob bs
+    | BSL.null bs -> ["$?\r\n;0\r\n"]
+    | otherwise -> ["$?\r\n", ";", showBs $ BSL.length bs, eol, toStrictBs bs, "\r\n;0\r\n"]
   RespStringError txt -> ["-", txt, eol]
   RespBlobError bs -> ["!", showBs $ BS.length bs, eol, bs, eol]
   RespArray els -> ["*", showBs $ length els, eol] <> concatMap encodeExpr' els
