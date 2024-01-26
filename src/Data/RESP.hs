@@ -50,14 +50,11 @@ import Scanner              (Scanner)
 import Control.Monad        (when, replicateM)
 import GHC.Generics         (Generic)
 
--- This type synonym was introduced in bytestring 0.11.2.0
-type LazyByteString = BSL.ByteString
-
 #if MIN_VERSION_bytestring(0,10,0)
-lazyBsToStrict :: LazyByteString -> ByteString
+lazyBsToStrict :: BSL.ByteString -> ByteString
 lazyBsToStrict = BSL.toStrict
 #else
-lazyBsToStrict :: LazyByteString -> ByteString
+lazyBsToStrict :: BSL.ByteString -> ByteString
 lazyBsToStrict = BS.concat . BSL.toChunks
 #endif
 
@@ -93,7 +90,7 @@ data RespMessage
 data RespExpr
   = RespString !ByteString
   | RespBlob !ByteString
-  | RespStreamingBlob !LazyByteString
+  | RespStreamingBlob !BSL.ByteString
   | RespStringError !ByteString
   | RespBlobError !ByteString
   | RespArray ![RespExpr]
@@ -309,7 +306,7 @@ parseBlob = parseBlob' RespBlob RespStreamingBlob $ pure RespNull
 -- general case for something that's pretty blobstring-like
 parseBlob'
   :: (ByteString -> a)
-  -> (LazyByteString -> a)
+  -> (BSL.ByteString -> a)
   -> Scanner a
   -> Scanner a
 parseBlob' strictConstr lazyConstr nullConstr = do
