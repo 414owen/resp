@@ -18,12 +18,9 @@ import Data.Monoid ((<>), mempty)
 #endif
 
 import Data.ByteString                 (ByteString)
-import Data.RESP                       (RespReply(..), RespExpr(..))
+import Data.RESP                       (RespMessage(..), RespExpr(..))
 import qualified Data.ByteString.UTF8  as BSU
 import qualified Data.RESP             as R3
--- import qualified Data.Text.Encoding    as T
--- import qualified Data.Text             as T
--- import Data.Text                       (Text)
 import qualified Data.ByteString       as BS
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.ByteString.Lazy  as BSL
@@ -111,14 +108,14 @@ instance Arbitrary RespExpr where
     RespNull -> []
     RespAttribute a b -> RespAttribute <$> shrink a <*> shrink b
 
-instance Arbitrary RespReply where
+instance Arbitrary RespMessage where
   arbitrary = QC.oneof
     [ RespPush <$> arbBs <*> arbitrary
-    , RespExpr <$> arbitrary
+    , RespReply <$> arbitrary
     ]
   shrink reply = case reply of
     RespPush a b -> RespPush <$> shrinkBs a <*> shrink b
-    RespExpr a -> RespExpr <$> shrink a
+    RespReply a -> RespReply <$> shrink a
 
 showBs :: Show a => a -> ByteString
 showBs = BSU.fromString . show
@@ -160,17 +157,17 @@ encodeExpr' e = case e of
 encodeTup :: (RespExpr, RespExpr) -> [ByteString]
 encodeTup (a, b) = concatMap encodeExpr' [a, b]
 
-encodeReply :: RespReply -> ByteString
-encodeReply repl = BS.concat $ case repl of
+encodeMessage :: RespMessage -> ByteString
+encodeMessage repl = BS.concat $ case repl of
   RespPush t msgs -> [">", showBs $ succ $ length msgs, eol, "$", showBs $ BS.length t, eol, t, eol]
     <> concatMap encodeExpr' msgs
-  RespExpr e -> encodeExpr' e
+  RespReply e -> encodeExpr' e
 
 parseExpr :: ByteString -> Either String RespExpr
 parseExpr = scanOnly R3.parseExpression
 
-parseReply :: ByteString -> Either String RespReply
-parseReply = scanOnly R3.parseReply
+parseMessage :: ByteString -> Either String RespMessage
+parseMessage = scanOnly R3.parseMessage
 
 testStr :: ByteString -> ByteString -> Assertion
 testStr bs expected = parseExpr bs @?= Right (RespString expected)
@@ -363,13 +360,13 @@ main = defaultMain $ testGroup "Tests"
 
   , testGroup "push"
     -- from markdown spec
-    [ testCase "empty" $ parseReply ">1\r\n+test\r\n\r\n" @?= Right (RespPush "test" [])
-    , testCase "simple message type" $ parseReply ">3\r\n+message\r\n+somechannel\r\n+this is the message\r\n"
+    [ testCase "empty" $ parseMessage ">1\r\n+test\r\n\r\n" @?= Right (RespPush "test" [])
+    , testCase "simple message type" $ parseMessage ">3\r\n+message\r\n+somechannel\r\n+this is the message\r\n"
         @?= Right (RespPush "message" [RespString "somechannel", RespString "this is the message"])
-    , testCase "blob string els" $ parseReply ">3\r\n$7\r\nmessage\r\n$6\r\nsecond\r\n$5\r\nHello\r\n"
+    , testCase "blob string els" $ parseMessage ">3\r\n$7\r\nmessage\r\n$6\r\nsecond\r\n$5\r\nHello\r\n"
         @?= Right (RespPush "message" [RespBlob "second", RespBlob "Hello"])
     ]
 
   , testProperty "roundtrip expr" $ \ex -> parseExpr (encodeExpr ex) === Right ex
-  , testProperty "roundtrip reply" $ \reply -> parseReply (encodeReply reply) === Right reply
+  , testProperty "roundtrip reply" $ \reply -> parseMessage (encodeMessage reply) === Right reply
   ]

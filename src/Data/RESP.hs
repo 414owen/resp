@@ -4,12 +4,23 @@
 #endif
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TupleSections     #-}
-{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveGeneric     #-}
+
+{-|
+RESP is the wire protocol that Redis uses.
+The latest version is RESP3, which at time of writing
+seems relatively complete, but may still be evolving.
+
+This module parses the entire RESP3 spec (as of 2024-01-26),
+but also parses some invalid RESP forms that Redis may return,
+eg `-nan`, and parses RESP2 forms that have been removed from
+the spec (eg `$-1\r\n`).
+-}
 
 module Data.RESP
-  ( RespReply(..)
+  ( RespMessage(..)
   , RespExpr(..)
-  , parseReply
+  , parseMessage
   , parseExpression
   ) where
 
@@ -50,11 +61,12 @@ lazyBsToStrict :: LazyByteString -> ByteString
 lazyBsToStrict = BS.concat . BSL.toChunks
 #endif
 
--- | Top-level resp reply.
--- Cannot be nested.
-data RespReply
+-- | A message from the server (eg. Redis) to the client.
+-- This can be a push message (for pub/sub), or a reply to a command
+-- issued by the client.
+data RespMessage
   = RespPush !ByteString ![RespExpr]
-  | RespExpr !RespExpr
+  | RespReply !RespExpr
   deriving (Show, Eq, Ord, Generic)
 
 -- | RESP3 Expression.
@@ -69,18 +81,15 @@ data RespReply
 -- previous versions of the RESP spec, and clients should treat the
 -- different encodings the same.
 --
--- Why don't we parse `RespString` into `Text`? Well, the caller might
+-- Why don't we parse `RespString` into `Data.Text.Text`? Well, the caller might
 -- not actually need to decode it into text, and so we let the caller
 -- decide. This way, we don't have to deal with encoding errors.
 --
--- Similarly, we don't parse a `RespMap` into a `HashMap`, because
--- that would involve imposing our choice of data structure on the caller.
--- They might want to use `HashMap`, `Map`, or just use the `lookup`
+-- Similarly, we don't parse a `RespMap` into a `Data.HashMap.HashMap`,
+-- because that would involve imposing our choice of data structure on
+-- the caller. The caller might want to use `Data.HashMap.HashMap`,
+-- `Data.Map.Map`, iterate over the elements, or just use the `lookup`
 -- function.
---
--- Given these choices, our purview is simple: Parse the text protocol
--- into a Haskell datatype, maintaining all useful information, and not
--- imposing our taste onto the caller.
 data RespExpr
   = RespString !ByteString
   | RespBlob !ByteString
@@ -109,19 +118,19 @@ data NullableMessageSize
   | NMSMinusOne
   | NMSFixed Int
 
--- Top level RESP item
-parseReply :: Scanner RespReply
-parseReply = do
+-- | Parse a RESP3 message
+parseMessage :: Scanner RespMessage
+parseMessage = do
   c <- Scanner.anyChar8
   case c of
     '>' -> parsePush
-    _ -> RespExpr <$> parseExpression' c
+    _ -> RespReply <$> parseExpression' c
 
--- Non-top-level resp item
+-- | Parse a RESP3 expression
 parseExpression :: Scanner RespExpr
 parseExpression = Scanner.anyChar8 >>= parseExpression'
 
--- Non-top-level resp item, taking its first char as a parameter
+-- | Parse a RESP3 expression, taking its first char as a parameter
 parseExpression' :: Char -> Scanner RespExpr
 parseExpression' c = case c of
   '$' -> parseBlob
@@ -140,7 +149,7 @@ parseExpression' c = case c of
   '|' -> RespAttribute <$> parseMap <*> parseExpression
   _ -> fail $ "Unknown expression prefix: " <> show c
 
-parsePush :: Scanner RespReply
+parsePush :: Scanner RespMessage
 parsePush = do
   len <- parseMessageSize
   RespPush <$> parsePushType <*> replicateM (pred len) parseExpression
