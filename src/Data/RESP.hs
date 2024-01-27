@@ -14,7 +14,7 @@ seems relatively complete, but may still be evolving.
 This module parses the entire RESP3 spec (as of 2024-01-26),
 but also parses some invalid RESP forms that Redis may return,
 eg `-nan`, and parses RESP2 forms that have been removed from
-the spec (eg `$-1\r\n`).
+the spec (eg `$-1\\r\\n`).
 -}
 
 module Data.RESP

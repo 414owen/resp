@@ -1,5 +1,9 @@
 # Revision history for resp
 
+## Unreleased
+
+* Fix some module haddock char escaping
+
 ## 2.0.0 -- 2024-01-26
 
 * Change name of type RespReply to RespMessage
